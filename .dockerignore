@@ -1,0 +1,27 @@
+# Build context is the monorepo root (see packages/api/Dockerfile).
+# `turbo prune` reads source + lockfiles from here, so only strip what no
+# Docker build ever needs.
+
+**/node_modules
+**/.turbo
+out
+
+# local env files (pass secrets via --build-arg / runtime env instead)
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# build outputs (rebuilt inside the image, not copied in)
+**/dist
+**/build
+**/.next
+
+# vcs / editor / misc
+.git
+.gitignore
+**/*.log
+.DS_Store
+*.pem

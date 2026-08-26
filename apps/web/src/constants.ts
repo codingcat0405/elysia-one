@@ -1,0 +1,1 @@
+export const ACCESS_TOKEN_KEY = "elysia_mono_jwt"
