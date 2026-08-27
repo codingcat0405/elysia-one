@@ -1,130 +1,111 @@
-import cluster from 'node:cluster'
-import type { Worker } from 'node:cluster'
-import { EventEmitter } from 'node:events'
-import os from 'node:os'
-import process from 'node:process'
-import { initORM } from './db'
-import logger from './utils/logger'
+import process from "node:process";
+import { initORM } from "./db";
+import logger from "./utils/logger";
+import cors from "@elysiajs/cors";
+import { setup } from "./middlewares/setup";
+import responseMiddleware from "./middlewares/responseMiddleware";
+import errorMiddleware from "./middlewares/errorMiddleware";
+import userController from "./modules/user";
+import Elysia from "elysia";
+import swagger from "@elysiajs/swagger";
 
-// type-only: erased at build time, so importing this from `api` never pulls
-// in (or runs) the server's runtime code — safe for the frontend to import
-export type { App } from './server.js'
-
-// bun-types' `Cluster` type omits the EventEmitter methods it has at runtime
-const clusterEvents = cluster as unknown as EventEmitter
-
-let shuttingDown = false
-for (const key of ['JWT_SECRET', 'DATABASE_URL']) {
+for (const key of ["JWT_SECRET", "DATABASE_URL"]) {
   if (!process.env[key]) {
-    throw new Error(`Missing required env var: ${key}`)
+    throw new Error(`Missing required env var: ${key}`);
   }
 }
-if(process.env.ENABLE_BULL_BOARD === 'true') {
+if (process.env.ENABLE_BULL_BOARD === "true") {
   if (!process.env.BULL_BOARD_USER || !process.env.BULL_BOARD_PASSWORD) {
-    throw new Error('Missing required env var: BULL_BOARD_USER or BULL_BOARD_PASSWORD')
-  }
-}
-
-const syncSchema = async (closeWhenDone: boolean) => {
-  const { orm } = await initORM()
-  await orm.schema.updateSchema();
-  if (closeWhenDone) {
-    await orm.close()
-  }
-  return orm
-}
-
-const logReady = () => {
-  logger.info(`🦊 Elysia is running at http://localhost:${process.env.PORT}`)
-  if (process.env.ENABLE_SWAGGER === 'true') {
-    logger.info(`🦊 Swagger UI: http://localhost:${process.env.PORT}/swagger-ui`)
-  }
-  if (process.env.ENABLE_BULL_BOARD === 'true') {
-    logger.info(`🦊 Bull Board: http://localhost:${process.env.PORT}/bull-board Credentials: ${process.env.BULL_BOARD_USER}:${process.env.BULL_BOARD_PASSWORD}`)
+    throw new Error(
+      "Missing required env var: BULL_BOARD_USER or BULL_BOARD_PASSWORD",
+    );
   }
 }
 
 const main = async () => {
-  const workers = parseInt(process.env.WORKER_THREADS || '1')
+  const { orm } = await initORM();
+  await orm.schema.updateSchema();
+  // load lazily: @bull-board/elysia sync-requires elysia internally, which under
+  // Bun must not run before elysia has been ES-imported (memoirist is async)
+  const bullBoardPlugin =
+    process.env.ENABLE_BULL_BOARD === "true"
+      ? await (await import("./bull-board.js")).createBullBoardPlugin()
+      : null;
 
-  if (workers <= 1) {
-    //single mode cached in main thread => don't close the pool
-    await syncSchema(false)
-    logger.info(
-      `Running in single mode. Total database connection pool: ${Number(process.env.DB_POOL_MAX || 10)}`,
-    )
-    await import('./server.js')
-    logReady()
-
-    // single mode: forward signals directly to the server's own shutdown handler
-    process.on('SIGTERM', () => process.emit('SIGTERM' as any))
-    return
+  const app = new Elysia()
+    .use(cors())
+    .use(setup)
+    .onAfterHandle(responseMiddleware)
+    .onError(errorMiddleware)
+    .get("/", () => "It's works!")
+    .get("/health", () => ({ status: "ok" }))
+    .group("/api", (group) => group.use(userController));
+  if (bullBoardPlugin) app.use(bullBoardPlugin);
+  // compose everything BEFORE listen — never .use() after the server is live
+  if (process.env.ENABLE_SWAGGER === "true") {
+    app.use(
+      swagger({
+        path: "/swagger-ui",
+        provider: "swagger-ui",
+        documentation: {
+          info: {
+            title: "Elysia Forge",
+            description: "Production Ready Elysia Template. API documentation",
+            version: "1.0.0",
+          },
+          components: {
+            securitySchemes: {
+              JwtAuth: {
+                type: "http",
+                scheme: "bearer",
+                bearerFormat: "JWT",
+                description: "Enter JWT Bearer token **_only_**",
+              },
+            },
+          },
+        },
+        swaggerOptions: { persistAuthorization: true },
+      }),
+    );
   }
 
-  if (cluster.isPrimary) {
-     //cluster mode fork the datasource again in each worker => safe to close this connection in main thread
-    await syncSchema(true)
+  app.listen(Number(process.env.PORT ?? 3000));
 
-    if (workers > os.availableParallelism()) {
-      logger.warn(`WORKERS (${workers}) exceeds available parallelism (${os.availableParallelism()})`)
-    }
-    logger.info(
-      `Starting ${workers} workers. Total database connections: ${Number(process.env.DB_POOL_MAX || 10) * workers}`,
-    )
-
-    for (let i = 0; i < workers; i++) cluster.fork()
-
-    // #2: restart crashed workers, but never during a deliberate shutdown
-    clusterEvents.on('exit', (worker: Worker, code: number, signal: string) => {
-      //IMPORTANT: WITHOUT THIS CHECK, WORKERS WILL RESTART INFINITYLY IF THEY CRASH. AND APP CAN NOT SHUT DOWN.
-      if (shuttingDown) return
-      logger.warn(`Worker ${worker.process.pid} died (${signal ?? code}), restarting...`)
-      cluster.fork()
-    })
-
-    // #3: propagate shutdown signals to every worker, exit primary once all are gone
-    const shutdown = (signal: NodeJS.Signals) => {
-      if (shuttingDown) return
-      shuttingDown = true
-      logger.info(`${signal} received, stopping ${workers} workers...`)
-
-      const ids = Object.keys(cluster.workers ?? {})
-      if (ids.length === 0) {
-        process.exit(0)
-        return
-      }
-      for (const id of ids) cluster.workers?.[id]?.kill(signal)
-
-      clusterEvents.on('exit', () => {
-        if (Object.keys(cluster.workers ?? {}).length === 0) {
-          logger.info('All workers stopped, exiting primary')
-          process.exit(0)
-        }
-      })
-
-      // safety net: force-exit if workers hang past their own shutdown timeout
-      setTimeout(() => {
-        logger.warn('Workers did not exit in time, forcing shutdown')
-        process.exit(1)
-      }, 15_000).unref()
-    }
-    process.on('SIGTERM', () => shutdown('SIGTERM'))
-    process.on('SIGINT', () => shutdown('SIGINT'))
-
-    // log readiness once workers have actually come online, not just been spawned
-    let onlineCount = 0
-    clusterEvents.on('online', (worker: Worker) => {
-      onlineCount++
-      logger.info(`Worker ${worker.process.pid} online (${onlineCount}/${workers})`)
-      if (onlineCount === workers) logReady()
-    })
-  } else {
-    await import('./server.js')
-    logger.info(`Worker ${process.pid} started`)
+  const port = process.env.PORT ?? 3000;
+  console.log(`
+  _____ _         _         ___
+ | ____| |_   _ __(_) __ _  / _ \\ _ __   ___
+ |  _| | | | | / __| |/ _\` || | | | '_ \\ / _ \\
+ | |___| | |_| \\__ \\ | (_| || |_| | | | |  __/
+ |_____|_|\\__, |___/_|\\__,_| \\___/|_| |_|\\___|
+          |___/
+  Elysia One — the all-in-one Turborepo Elysia + React template
+  written by lilhuy0405
+`);
+  console.log(`🦊 Server:     http://localhost:${port}`);
+  if (process.env.ENABLE_SWAGGER === "true") {
+    console.log(`📚 Swagger:    http://localhost:${port}/swagger-ui`);
   }
-}
+  if (process.env.ENABLE_BULL_BOARD === "true") {
+    console.log(
+      `📊 Bull Board: http://localhost:${port}/bull-board (${process.env.BULL_BOARD_USER}:${process.env.BULL_BOARD_PASSWORD})`,
+    );
+  }
+  const shutdown = async (signal: string) => {
+    logger.info(`${signal} received, shutting down...`);
+    await app.stop();
+    await orm.close(); // release the pool this process owns
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+
+  return app;
+};
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+  console.error(err);
+  process.exit(1);
+});
+//eden treaty export type for FE apps
+export type App = Awaited<ReturnType<typeof main>>;

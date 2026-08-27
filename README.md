@@ -6,7 +6,7 @@ A Bun + Turborepo monorepo.
 
 ### Apps and Packages
 
-- `apps/web`: a [Vite](https://vite.dev/) + React app
+- `apps/client`: a [TanStack Start](https://tanstack.com/start) + React app (auth, eden-treaty API client)
 - `packages/api`: a [Bun](https://bun.sh/) + [Elysia](https://elysiajs.com/) API with [MikroORM](https://mikro-orm.io/) (PostgreSQL) — see `packages/api/README.md` for details
 
 Each package/app is 100% TypeScript.
@@ -39,7 +39,7 @@ bun run check-types
 Run for a single workspace with a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
 
 ```sh
-bunx turbo dev --filter=web
+bunx turbo dev --filter=client
 bunx turbo check-types --filter=api
 ```
 
