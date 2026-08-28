@@ -2,12 +2,24 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import Header from '../components/Header'
+import { fetchMe } from '../lib/eden-client'
 
 import appCss from '../styles.css?url'
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'auto';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
 
 export const Route = createRootRoute({
+  // Header (below) is always SSR'd and can't read the httpOnly cookie itself;
+  // this loader gives it a same-request-consistent initial user so the very
+  // first paint (server and client, pre-hydration) already shows the right
+  // state instead of flashing logged-out. `_authed`'s loader duplicates this
+  // /users/me call for its own route — both are cheap (one JWT verify), and
+  // TanStack Router doesn't dedupe loaders across route levels; not worth
+  // engineering shared request-level caching for it.
+  loader: async () => {
+    const user = await fetchMe()
+    return { user: user ? { id: user.id, username: user.username, role: user.role } : null }
+  },
   head: () => ({
     meta: [
       {
@@ -40,6 +52,7 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const { user } = Route.useLoaderData()
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -47,7 +60,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
-        <Header />
+        <Header initialUser={user} />
         {children}
         <TanStackDevtools
           config={{

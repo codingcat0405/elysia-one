@@ -1,26 +1,24 @@
 import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 import { useEffect } from 'react'
-import { clearToken, getToken } from '#/lib/auth.ts'
-import { api, unwrap } from '#/lib/eden-client.ts'
+import { fetchMe } from '#/lib/eden-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
 
 // Pathless layout wrapping every authenticated screen.
-// `ssr: false` so the localStorage token check + /users/me fetch run in the browser.
+// The token is an httpOnly cookie now, so this runs during SSR too — the
+// incoming request already carries the cookie (forwarded in eden-client.ts).
+// Auth is enforced before HTML ships; no client-only pre-check is needed or
+// possible (JS can't read an httpOnly cookie).
 export const Route = createFileRoute('/_authed')({
-  ssr: false,
-  beforeLoad: () => {
-    if (!getToken()) throw redirect({ to: '/login' })
-  },
   loader: async () => {
-    try {
-      const me = await unwrap(api.users.me.get())
-      return { user: { id: me.id, username: me.username, role: me.role } }
-    } catch {
-      // expired / invalid / revoked token — drop it, wipe identity, bounce to login
-      clearToken()
-      useUserStore.getState().clearUser()
-      throw redirect({ to: '/login' })
-    }
+    const user = await fetchMe()
+    // fetchMe() already tried one silent refresh — a null here is a real
+    // logout. Do NOT clear the store here: this loader also runs on the
+    // server, where the store is process-global and shared across concurrent
+    // requests. Client-side state is cleared by unwrapAuthed / Header's logout.
+    if (!user) throw redirect({ to: '/login' })
+    // narrow to the store's User shape — /users/me has no response schema, so
+    // Eden's inferred type is the full entity, not just {id, username, role}
+    return { user: { id: user.id, username: user.username, role: user.role } }
   },
   component: AuthedLayout,
 })

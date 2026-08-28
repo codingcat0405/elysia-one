@@ -6,14 +6,12 @@ import {
 } from '@tanstack/react-router'
 import { AuthForm } from '#/components/auth-form.tsx'
 import type { Credentials } from '#/components/auth-form.tsx'
-import { getToken, setToken } from '#/lib/auth.ts'
-import { api, unwrap } from '#/lib/eden-client.ts'
+import { api, fetchMe, unwrap } from '#/lib/eden-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
 
 export const Route = createFileRoute('/register')({
-  ssr: false,
-  beforeLoad: () => {
-    if (getToken()) throw redirect({ to: '/' })
+  beforeLoad: async () => {
+    if (await fetchMe()) throw redirect({ to: '/' })
   },
   component: RegisterPage,
 })
@@ -25,8 +23,8 @@ function RegisterPage() {
   const handleRegister = async ({ username, password }: Credentials) => {
     await unwrap(api.users.register.post({ username, password }))
     // log the user straight in on successful registration (same as old web app)
+    // the login call sets the auth cookies — nothing left to store client-side.
     const data = await unwrap(api.users.login.post({ username, password }))
-    setToken(data.jwt)
     setUser(data.user)
     await navigate({ to: '/' })
   }

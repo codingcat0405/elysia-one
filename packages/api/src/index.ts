@@ -9,10 +9,15 @@ import userController from "./modules/user";
 import Elysia from "elysia";
 import swagger from "@elysiajs/swagger";
 
-for (const key of ["JWT_SECRET", "DATABASE_URL", "REDIS_URL"]) {
+for (const key of ["JWT_SECRET", "JWT_REFRESH_SECRET", "DATABASE_URL", "REDIS_URL"]) {
   if (!process.env[key]) {
     throw new Error(`Missing required env var: ${key}`);
   }
+}
+// Identical secrets would let an access token be replayed as a refresh token
+// (and vice versa) at /api/users/refresh — silently defeats the two-secret design.
+if (process.env.JWT_REFRESH_SECRET === process.env.JWT_SECRET) {
+  throw new Error("JWT_REFRESH_SECRET must not equal JWT_SECRET");
 }
 if (process.env.ENABLE_BULL_BOARD === "true") {
   if (!process.env.BULL_BOARD_USER || !process.env.BULL_BOARD_PASSWORD) {
@@ -32,8 +37,14 @@ const main = async () => {
       ? await (await import("./bull-board.js")).createBullBoardPlugin()
       : null;
 
+  // A wildcard/reflected origin makes the browser discard the auth cookies when
+  // credentials:true — origin must be an explicit list, never `true`/`*`.
+  const clientOrigins = (process.env.CLIENT_URL ?? "http://localhost:3001")
+    .split(",")
+    .map((s) => s.trim());
+
   const app = new Elysia()
-    .use(cors())
+    .use(cors({ origin: clientOrigins, credentials: true }))
     .use(setup)
     .onAfterHandle(responseMiddleware)
     .onError(errorMiddleware)
@@ -56,15 +67,15 @@ const main = async () => {
           components: {
             securitySchemes: {
               JwtAuth: {
-                type: "http",
-                scheme: "bearer",
-                bearerFormat: "JWT",
-                description: "Enter JWT Bearer token **_only_**",
+                type: "apiKey",
+                in: "cookie",
+                name: "access_token",
+                description:
+                  "httpOnly access_token cookie, set by POST /api/users/login. Call login here first (same origin as this Swagger UI) — the browser stores the cookie and every subsequent \"Try it out\" call carries it automatically; there is no bearer token to paste.",
               },
             },
           },
         },
-        swaggerOptions: { persistAuthorization: true },
       }),
     );
   }

@@ -65,9 +65,13 @@ This template deliberately does **not** implement `node:cluster`/worker-thread s
 
 ### 10. Bull Board is Basic-Auth gated, not JWT — keep it that way
 
-`/bull-board` uses `utils/basic-auth.ts` (constant-time `timingSafeEqual` compare) deliberately, because it's a browser-native dashboard, not an API client that already carries a bearer token. `index.ts` fails boot fast if `ENABLE_BULL_BOARD=true` without credentials set — preserve that fail-fast check if you touch boot-time env validation.
+`/bull-board` uses `utils/basic-auth.ts` (constant-time `timingSafeEqual` compare) deliberately, because it's a browser-native dashboard without access to the app's JWT cookies. `index.ts` fails boot fast if `ENABLE_BULL_BOARD=true` without credentials set — preserve that fail-fast check if you touch boot-time env validation.
 
-### 11. `export type App` (`index.ts`) is a public contract for `apps/client`
+### 11. Auth cookies are read/written in exactly one place
+
+Cookie read/write logic lives in `utils/auth-tokens.ts` only: `signTokenPair()`, `setAuthCookies()`, `clearAuthCookies()`, `verifyRefreshToken()`. Services (e.g. `UserService`) stay HTTP-agnostic and never touch Elysia's `cookie` context. Controllers (`modules/user/index.ts`) and the auth macro (`macros/auth.ts`) are the only other places that call these utilities. If you need to add a new token-handling function, put it in `auth-tokens.ts` — don't scatter cookie logic across modules.
+
+### 12. `export type App` (`index.ts`) is a public contract for `apps/client`
 
 `apps/client` imports this type via `import type { App } from 'api'` and drives its Eden Treaty client off it (`apps/client/src/lib/eden-client.ts`) — that's the frontend's *only* type-safety net against the API's actual routes/schemas. Consequences:
 - Don't remove or rename the `App` export, and don't change `main`'s return shape in a way that breaks it.

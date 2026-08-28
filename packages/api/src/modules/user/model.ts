@@ -1,5 +1,11 @@
 import { t, type UnwrapSchema } from 'elysia'
 
+const publicUser = t.Object({
+  id: t.Numeric(),
+  username: t.String(),
+  role: t.String(),
+})
+
 export const UserModel = {
   registerBody: t.Object({
     username: t.String({ minLength: 3, maxLength: 64 }),
@@ -9,19 +15,10 @@ export const UserModel = {
     username: t.String(),
     password: t.String(),
   }),
-  publicUser: t.Object({
-    id: t.Numeric(),
-    username: t.String(),
-    role: t.String(),
-  }),
-  loginResponse: t.Object({
-    user: t.Object({
-      id: t.Numeric(),
-      username: t.String(),
-      role: t.String(),
-    }),
-    jwt: t.String(),
-  }),
+  publicUser,
+  // Token pair now travels as httpOnly cookies, not in the response body.
+  loginResponse: t.Object({ user: publicUser }),
+  logoutResponse: t.Object({ success: t.Boolean() }),
 } as const
 
 export type UserModel = {

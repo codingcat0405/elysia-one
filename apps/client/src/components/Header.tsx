@@ -1,18 +1,44 @@
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Button } from '#/components/ui/button.tsx'
 import ThemeToggle from './ThemeToggle'
-import { clearToken } from '#/lib/auth.ts'
+import { api, unwrap } from '#/lib/eden-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
+import type { User } from '#/stores/user-store.ts'
 
-export default function Header() {
+// `initialUser` comes from __root's loader (SSR-aware — reads the httpOnly
+// cookie via the incoming request). `useUserStore` is empty on the server and,
+// on the client, is also still empty on the very first render (before this
+// component's mount effect runs) — so both first renders agree with each
+// other by preferring `initialUser` until hydration, avoiding a
+// logged-out-then-flip flash. `hydrated` (not `user.id === 0`) gates the
+// switch to the live store: `id === 0` alone can't tell "not yet seeded" apart
+// from "just explicitly logged out", which would otherwise mask a real
+// clearUser() behind the stale initialUser until the next navigation resolves.
+export default function Header({ initialUser }: { initialUser: User | null }) {
   const navigate = useNavigate()
-  const { user, clearUser } = useUserStore()
-  const isAuthed = user.id !== 0
+  const { user, setUser, clearUser } = useUserStore()
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    if (initialUser) setUser(initialUser)
+    setHydrated(true)
+  }, [initialUser, setUser])
+
+  const displayUser = hydrated ? user : initialUser
+  const isAuthed = displayUser != null && displayUser.id !== 0
 
   const handleLogout = async () => {
-    clearToken()
-    clearUser()
-    await navigate({ to: '/login' })
+    // Clear local state and navigate even if the network call fails —
+    // otherwise a user with no connectivity can never log out.
+    try {
+      await unwrap(api.users.logout.post())
+    } catch {
+      // ignore — cookies may already be gone/expired, that's still "logged out"
+    } finally {
+      clearUser()
+      await navigate({ to: '/login' })
+    }
   }
 
   return (
@@ -30,7 +56,7 @@ export default function Header() {
           {isAuthed ? (
             <>
               <span className="text-[var(--sea-ink-soft)]">
-                {user.username}
+                {displayUser.username}
               </span>
               <Button variant="outline" size="sm" onClick={handleLogout}>
                 Log out

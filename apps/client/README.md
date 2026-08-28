@@ -8,7 +8,7 @@ TanStack Start + React 19 frontend for the `elysia-one` monorepo. Talks to `pack
 - React 19, Tailwind CSS v4, [shadcn/ui](https://ui.shadcn.com/) (`components/ui/`, style: `new-york`)
 - [Zustand](https://zustand.docs.pmnd.rs/) for global client state (currently: the logged-in user)
 - [`@elysia/eden`](https://elysiajs.com/eden/overview.html) (Eden Treaty) for a fully-typed API client generated from `packages/api`'s `App` type
-- JWT bearer auth, token kept in `localStorage`
+- JWT auth via httpOnly cookies (access + refresh token pair); auth state derived from `GET /users/me`
 
 ## Getting started
 
@@ -31,10 +31,10 @@ bun run preview
 
 ## Auth
 
-- JWT lives in `localStorage` (`src/lib/auth.ts`: `getToken`/`setToken`/`clearToken`), attached as `Authorization: Bearer <token>` by `src/lib/eden-client.ts`.
+- JWT access and refresh tokens are stored in httpOnly cookies (set by the server on `/users/login` and `/users/register`). They're never readable from JavaScript — auth state is derived by calling `GET /users/me` via `unwrapAuthed()` in `src/lib/eden-client.ts`.
 - Global "who's logged in" state is a Zustand store (`src/stores/user-store.ts`). `user.id === 0` is the "logged out" sentinel — there's no separate boolean flag.
-- `src/routes/_authed.tsx` is a pathless layout route: it guards on `getToken()`, fetches `/users/me` to hydrate the store, and clears the token + redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
-- `login.tsx` / `register.tsx` are `ssr: false` (token checks are browser-only) and share one form component, `components/auth-form.tsx`.
+- `src/routes/_authed.tsx` is a pathless layout route: its loader calls `fetchMe()` (SSR-aware, server-side calls `/users/me` with the httpOnly cookie), hydrates the store, and redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
+- `login.tsx` / `register.tsx` are **SSR-enabled** (not `ssr: false`) because the httpOnly cookie is available to the server on the initial request, and share one form component, `components/auth-form.tsx`.
 
 ## Type safety (Eden Treaty)
 

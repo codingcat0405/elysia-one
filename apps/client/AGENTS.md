@@ -8,9 +8,9 @@ Guide for AI coding agents (Claude Code, Cursor, Copilot, Aider, ...) working in
 
 Every request to `packages/api` uses `api.<path>.<method>()` (Eden Treaty, typed from the `App` type) plus the `unwrap()` helper from the same file, which turns Eden's `{ data, error }` result into throw-on-error/return-on-success so callers can use plain `try/catch`. Don't call `fetch`/`axios` against the API directly, and don't add a second API client.
 
-### 2. Auth token: only through `lib/auth.ts`, never touch `localStorage` directly elsewhere
+### 2. Auth token is an httpOnly cookie, never read from JavaScript
 
-`getToken`/`setToken`/`clearToken` are the only sanctioned access points for the JWT. They're SSR-safe (`hasLocalStorage()` guards `typeof window !== 'undefined'`) because TanStack Start renders some modules on the server, where `window` doesn't exist. If you add a new place that needs the token, import these helpers — don't read `window.localStorage` inline.
+The access/refresh token pair is stored in httpOnly cookies that cannot be read from JavaScript. To check whether the user is logged in, call `unwrapAuthed()` which invokes `GET /users/me` via the Eden client (server can read the cookie and echo back the user). Never store, read, or clear tokens from JavaScript — that logic is server-side only (Elysia's `setAuthCookies()`, `clearAuthCookies()` in `packages/api/src/utils/auth-tokens.ts`).
 
 ### 3. Global user state: `stores/user-store.ts`, `user.id === 0` means logged out
 
@@ -18,11 +18,15 @@ The Zustand store is the single source of truth for "who's logged in" across the
 
 ### 4. `_authed.tsx` is the only place that authenticates + hydrates the user store
 
-It's a pathless layout route: guards with `beforeLoad` on `getToken()`, calls `GET /users/me` in its `loader`, and on any failure clears the token, clears the store, and redirects to `/login`. New authenticated screens go under `routes/_authed/` as children of this layout so they inherit the guard — don't re-implement a per-route "am I logged in" check.
+It's a pathless layout route: its `loader` calls `fetchMe()` (SSR-aware) and on any failure clears the store and redirects to `/login`. Because the token is httpOnly, the server can read it from cookies on the initial request (no synchronous JS-side pre-check possible). New authenticated screens go under `routes/_authed/` as children of this layout so they inherit the guard — don't re-implement a per-route "am I logged in" check.
 
-### 5. Auth-sensitive routes are `ssr: false` — keep new ones consistent
+### 5. Auth routes are SSR-enabled because the httpOnly cookie reaches the server
 
-`login.tsx`, `register.tsx`, and `_authed.tsx` all set `ssr: false` because they depend on `localStorage`, which doesn't exist during SSR. If you add a route that reads the token or the user store before render, it needs the same `ssr: false` (or must defer that read to an effect/event handler that only runs client-side).
+`login.tsx`, `register.tsx`, and `_authed.tsx` are **not** `ssr: false` (and must **not** be marked `ssr: false`). Because the httpOnly token cookie is sent automatically on every request, these routes can read the session server-side during SSR: the server calls `/users/me` and populates the user before hydration. If you add a new auth-touching route, do **not** add `ssr: false` — keep SSR enabled so the server can read the cookie and set up the page correctly on the first request. Routes that talk to APIs expecting an authenticated session **must** be SSR-enabled.
+
+### 5.5. Zustand store is process-global on SSR servers — never write request state to it in loaders
+
+The `useUserStore` (Zustand) and any refresh-token-dedupe promise are module-scope state, which becomes process-global when the app runs on an SSR server. Never write request-derived data like the current user from a `loader` or `beforeLoad` that runs server-side — every incoming request would see the previous request's user data. Only update these stores from client-only code (`useEffect`, event handlers) or inline in components that are client-rendered. Server-side reads for initial hydration (e.g. in `_authed.tsx`'s loader) are fine — just don't persist them to module scope.
 
 ### 6. Eden Treaty types come from a build artifact — rebuild `packages/api` after backend changes
 

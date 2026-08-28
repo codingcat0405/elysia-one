@@ -25,9 +25,10 @@ Non-negotiable consequences:
 
 ## Auth model (spans both packages)
 
-- `packages/api` issues JWTs (`jsonwebtoken`, `JWT_SECRET`/`JWT_EXPIRES_IN`) on login/register and verifies them per-request via the `checkAuth` macro (`packages/api/src/macros/auth.ts`). See `packages/api/AGENTS.md` for backend-side rules.
-- `apps/client` stores the token in `localStorage` (`apps/client/src/lib/auth.ts`) and mirrors "who's logged in" in a Zustand store (`apps/client/src/stores/user-store.ts`). See `apps/client/AGENTS.md` for frontend-side rules.
-- There is no server-side session and no cookie — the token lives entirely client-side and is sent as `Authorization: Bearer <token>` (wired once, in `eden-client.ts`'s `headers()`). Don't introduce a second auth mechanism (e.g. cookie-based sessions) without updating both sides deliberately — the two are not designed to coexist.
+- `packages/api` issues two stateless JWTs on login/register (`jsonwebtoken`, `JWT_SECRET`/`JWT_REFRESH_SECRET`, separate secrets so an access token can never be replayed as a refresh token): an access token (`15m` lifetime, read from the `access_token` httpOnly cookie), and a refresh token (`30d` lifetime, read from the `refresh_token` httpOnly cookie). Verification happens per-request via the `checkAuth` macro (`packages/api/src/macros/auth.ts`). Refresh-token rotation is stateless (no database token table) — every call to `POST /api/users/refresh` re-reads the user row from the database as the only revocation lever. `POST /api/users/logout` clears both cookies server-side. See `packages/api/AGENTS.md` for backend-side rules.
+- `apps/client` never reads the tokens (they're httpOnly, invisible to JavaScript). Auth state is derived by calling `GET /users/me` via `unwrapAuthed()` in `eden-client.ts`, never read from client-side storage. A Zustand store (`apps/client/src/stores/user-store.ts`) mirrors "who's logged in". See `apps/client/AGENTS.md` for frontend-side rules.
+- **Important: SameSite=Strict limitation.** Cookies use `SameSite=Strict` for CSRF mitigation, which requires client and API to share a registrable domain. A genuinely cross-site deployment (API on `api.example.com`, client on `app.different-site.com`) doesn't work — cookies are never sent cross-site even with explicit credentials. If that's your use case, switch to `SameSite=None` + a real CSRF token scheme (out of scope; currently not implemented).
+- Don't introduce a second auth mechanism (e.g. JWT bearer header alongside cookies, or OAuth without updating both sides) without updating both packages deliberately — they are not designed to coexist.
 
 ## No in-process horizontal scaling — that's the deployment platform's job
 
@@ -46,7 +47,7 @@ bunx turbo build --filter=api      # single workspace — run after backend rout
 
 ## Env files
 
-- `packages/api/.env` (from `.env.example`) — `DATABASE_URL`, `JWT_SECRET`, `REDIS_URL` are required at boot; see `packages/api/README.md` for the full table.
+- `packages/api/.env` (from `.env.example`) — `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `REDIS_URL` are required at boot (fails fast if missing, or if the two JWT secrets are equal). `CLIENT_URL` is not boot-required — it defaults to `http://localhost:3001` — but must be set correctly for credentialed CORS to work outside that default. See `packages/api/README.md` for the full table.
 - `apps/client/.env` (from `.env.example`) — `VITE_API_URL`, defaults to `http://localhost:3000`.
 
 Never commit `.env` files. Adding a new required var to either package: update its `.env.example` with a comment explaining when it's required.

@@ -1,13 +1,9 @@
 import { EntityManager, UniqueConstraintViolationException } from '@mikro-orm/postgresql'
-import jwt from 'jsonwebtoken'
 import { User } from '../../entities/User'
 import { ConflictError, UnauthorizedError } from '../../utils/http-errors'
 import type { UserModel } from './model'
 import { userQueue } from './queue'
 import logger from '../../utils/logger'
-
-// cast: @types/jsonwebtoken types expiresIn as ms.StringValue, env vars are plain strings
-const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN ?? '1d') as jwt.SignOptions['expiresIn']
 
 // Precomputed at module load so login() always pays the same bcrypt-verify
 // cost whether or not the username exists — closes the timing side-channel.
@@ -58,12 +54,7 @@ export class UserService {
     if (!user || !passwordOk)
       throw new UnauthorizedError('Invalid username or password')
 
-    const token = jwt.sign(
-      { id: Number(user.id), role: user.role },
-      process.env.JWT_SECRET!, // presence is asserted at boot in index.ts
-      { expiresIn: JWT_EXPIRES_IN },
-    )
-    return { user: this.toPublic(user), jwt: token }
+    return this.toPublic(user)
   }
 
   async findById(id: number) {

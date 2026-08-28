@@ -6,7 +6,7 @@ A Bun + Turborepo monorepo.
 
 ### Apps and Packages
 
-- `apps/client`: a [TanStack Start](https://tanstack.com/start) + React app — JWT auth (bearer token in `localStorage`), Zustand for global user state, Eden Treaty typed API client. See `apps/client/README.md` / `apps/client/AGENTS.md`.
+- `apps/client`: a [TanStack Start](https://tanstack.com/start) + React app — JWT auth (httpOnly cookies: access + refresh token pair), Zustand for global user state, Eden Treaty typed API client. See `apps/client/README.md` / `apps/client/AGENTS.md`.
 - `packages/api`: a [Bun](https://bun.sh/) + [Elysia](https://elysiajs.com/) API with [MikroORM](https://mikro-orm.io/) (PostgreSQL) + BullMQ/Redis. See `packages/api/README.md` / `packages/api/AGENTS.md`.
 
 Each package/app is 100% TypeScript. **AI agents and contributors: read `AGENTS.md` (root) before making cross-cutting changes** — it covers the FE/BE contract boundary that the two sub-`AGENTS.md` files don't individually own.

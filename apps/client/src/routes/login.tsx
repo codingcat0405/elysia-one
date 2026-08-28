@@ -6,15 +6,14 @@ import {
 } from '@tanstack/react-router'
 import { AuthForm } from '#/components/auth-form.tsx'
 import type { Credentials } from '#/components/auth-form.tsx'
-import { getToken, setToken } from '#/lib/auth.ts'
-import { api, unwrap } from '#/lib/eden-client.ts'
+import { api, fetchMe, unwrap } from '#/lib/eden-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
 
 export const Route = createFileRoute('/login')({
-  // token lives in localStorage — guard + redirect must run in the browser
-  ssr: false,
-  beforeLoad: () => {
-    if (getToken()) throw redirect({ to: '/' })
+  // Cookie is unreadable from JS — check runs server-side (or client, on
+  // client-side nav) via /users/me instead of a synchronous token read.
+  beforeLoad: async () => {
+    if (await fetchMe()) throw redirect({ to: '/' })
   },
   component: LoginPage,
 })
@@ -24,9 +23,8 @@ function LoginPage() {
   const setUser = useUserStore((s) => s.setUser)
 
   const handleLogin = async ({ username, password }: Credentials) => {
+    // The API already set the auth cookies on this response — nothing to store.
     const data = await unwrap(api.users.login.post({ username, password }))
-    console.log(data)
-    setToken(data.jwt)
     setUser(data.user)
     await navigate({ to: '/' })
   }

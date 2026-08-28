@@ -1,13 +1,13 @@
 # Elysia Forge - Elysia + MikroORM + BullMQ template
 
-Production-hardened Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), JWT auth. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
+Production-hardened Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), stateless JWT auth via httpOnly cookies (access + refresh token pair). Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
 
 Horizontal scaling is handled by the deployment platform (multiple stateless replicas, e.g. Kubernetes), not by in-process clustering — this template deliberately does not implement `node:cluster`/worker-thread scaling. See "Pool sizing" below.
 
 ## Quick start
 
 ```bash
-cp .env.example .env   # fill JWT_SECRET (openssl rand -base64 48) and DATABASE_URL
+cp .env.example .env   # fill JWT_SECRET, JWT_REFRESH_SECRET (each: openssl rand -base64 48), DATABASE_URL, REDIS_URL
 bun install
 bun dev                 # watch mode; schema auto-sync on boot (see "Schema" below)
 ```
@@ -44,7 +44,7 @@ src/
     errorMiddleware.ts        # maps HttpError / validation / 404 -> JSON, else generic 500
 
   macros/
-    auth.ts                   # `checkAuth(roles)` macro: verifies JWT, injects `user`
+    auth.ts                   # `checkAuth(roles)` macro: reads + verifies JWT from cookies, injects `user`
 
   modules/
     user/
@@ -110,7 +110,7 @@ This only works if `packages/api`'s declaration output is built: `bun run build`
 
 ### Bull Board dashboard
 
-Mounted at `/bull-board`, gated by HTTP Basic Auth (`utils/basic-auth.ts`, constant-time compare) — deliberately not the app's JWT, since this is a browser-native dashboard, not an API client. Boot fails fast (`index.ts`) if `ENABLE_BULL_BOARD=true` but `BULL_BOARD_USER`/`BULL_BOARD_PASSWORD` aren't set. Exposes internal job payloads — never expose this publicly without auth.
+Mounted at `/bull-board`, gated by HTTP Basic Auth (`utils/basic-auth.ts`, constant-time compare) — deliberately not the app's JWT cookies, since this is a browser-native dashboard without direct access to the httpOnly auth cookies. Boot fails fast (`index.ts`) if `ENABLE_BULL_BOARD=true` but `BULL_BOARD_USER`/`BULL_BOARD_PASSWORD` aren't set. Exposes internal job payloads — never expose this publicly without auth.
 
 ### Redis: two separate clients, on purpose
 
@@ -135,8 +135,12 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 |---|---|---|---|
 | `PORT` | no | `3000` | HTTP port |
 | `DATABASE_URL` | **yes** | — | Postgres connection string |
-| `JWT_SECRET` | **yes** | — | Boot fails fast if missing |
-| `JWT_EXPIRES_IN` | no | `1d` | jsonwebtoken `expiresIn` |
+| `JWT_SECRET` | **yes** | — | Secret for signing access tokens; boot fails fast if missing |
+| `JWT_REFRESH_SECRET` | **yes** | — | Secret for signing refresh tokens; must differ from `JWT_SECRET`; boot fails fast if missing or equal |
+| `JWT_EXPIRES_IN` | no | `15m` | Access token lifetime (jsonwebtoken `expiresIn`) |
+| `JWT_REFRESH_EXPIRES_IN` | no | `30d` | Refresh token lifetime |
+| `CLIENT_URL` | no | `http://localhost:3001` | Exact browser origin(s) for credentialed CORS, comma-separated for multiple. Not boot-required (defaults to the dev port), but a wrong value silently breaks cookie storage in the browser — no boot-time check catches it |
+| `COOKIE_DOMAIN` | no | — | Shared parent domain when client and API are on different subdomains (e.g. `.example.com`); required in prod if split across subdomains |
 | `DB_POOL_MIN` / `DB_POOL_MAX` | no | `0` / `10` | Per-process pool; multiply by replica count when sizing Postgres `max_connections` |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS` | no | `10000` | Fail fast instead of hanging |
 | `DB_POOL_IDLE_TIMEOUT_MS` | no | `30000` | Keep under infra idle timeouts |
@@ -145,8 +149,20 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 | `WORKER_CONCURRENCY` | no | `5` | Jobs processed in parallel, per worker process |
 | `ENABLE_BULL_BOARD` | no | `false` | If `true`, `BULL_BOARD_USER`/`PASSWORD` become required |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` | conditionally | — | HTTP Basic Auth for `/bull-board` |
-| `NODE_ENV` | no | — | `production` switches log format + Docker default |
+| `NODE_ENV` | no | — | `production` switches log format + Docker default; also enables `Secure` flag on cookies |
 | `LOG_LEVEL` | no | `info`(prod)/`debug`(dev) | winston level |
+
+## Deploying with cookie auth
+
+The httpOnly cookie authentication model imposes a few deployment constraints:
+
+1. **CLIENT_URL must be the exact browser origin.** Credentialed cookies silently fail to store if the browser origin doesn't match the cookie's domain exactly. `CLIENT_URL=https://app.example.com` works; `CLIENT_URL=https://app.*.com` (wildcard) silently breaks without a visible error — the browser refuses to store the cookie.
+
+2. **COOKIE_DOMAIN is required only when client and API live on different subdomains.** If client is `app.example.com` and API is `api.example.com`, set `COOKIE_DOMAIN=.example.com` so both can read the cookie. Without it, the SSR server never receives the cookie on initial requests, and every page load redirects to `/login`. If both are on `localhost` or the same exact domain, `COOKIE_DOMAIN` is unnecessary.
+
+3. **SameSite=Strict prevents cross-site cookie delivery.** The cookies use `SameSite=Strict` for CSRF mitigation, which means they are never sent if the browser's `Origin` header doesn't match the cookie's domain. A genuinely cross-site deployment (e.g. `api.example.com` serving `app.different-site.com`) doesn't work without switching to `SameSite=None` and implementing a real CSRF token scheme (out of scope; currently not implemented).
+
+4. **NODE_ENV=production enables the Secure flag.** In production, cookies are marked `Secure`, so they're only sent over HTTPS. Locally, without `NODE_ENV=production`, cookies are sent over HTTP for easier testing. If your deployment doesn't set `NODE_ENV=production`, cookies won't be sent to HTTPS clients (or vice versa).
 
 ## Known gaps (don't assume these are solved)
 
