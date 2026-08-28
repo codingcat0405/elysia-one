@@ -1,3 +1,59 @@
+# AGENTS.md
+
+Guide for AI coding agents (Claude Code, Cursor, Copilot, Aider, ...) working in `apps/client`. Read the root [`AGENTS.md`](../../AGENTS.md) first for the FE/BE contract (Eden Treaty, auth model) — this file covers frontend-internal conventions only. Read `README.md` for the stack overview.
+
+## Non-negotiable invariants
+
+### 1. All API calls go through `lib/eden-client.ts` — never a raw `fetch`
+
+Every request to `packages/api` uses `api.<path>.<method>()` (Eden Treaty, typed from the `App` type) plus the `unwrap()` helper from the same file, which turns Eden's `{ data, error }` result into throw-on-error/return-on-success so callers can use plain `try/catch`. Don't call `fetch`/`axios` against the API directly, and don't add a second API client.
+
+### 2. Auth token: only through `lib/auth.ts`, never touch `localStorage` directly elsewhere
+
+`getToken`/`setToken`/`clearToken` are the only sanctioned access points for the JWT. They're SSR-safe (`hasLocalStorage()` guards `typeof window !== 'undefined'`) because TanStack Start renders some modules on the server, where `window` doesn't exist. If you add a new place that needs the token, import these helpers — don't read `window.localStorage` inline.
+
+### 3. Global user state: `stores/user-store.ts`, `user.id === 0` means logged out
+
+The Zustand store is the single source of truth for "who's logged in" across the app (e.g. `Header.tsx` branches on it). It uses `user.id === 0` as the logged-out sentinel — not a separate `isAuthenticated` boolean — to mirror the previous app's model. Keep using that sentinel if you touch this store; don't add a parallel auth-state mechanism (e.g. React context) that can drift out of sync with it.
+
+### 4. `_authed.tsx` is the only place that authenticates + hydrates the user store
+
+It's a pathless layout route: guards with `beforeLoad` on `getToken()`, calls `GET /users/me` in its `loader`, and on any failure clears the token, clears the store, and redirects to `/login`. New authenticated screens go under `routes/_authed/` as children of this layout so they inherit the guard — don't re-implement a per-route "am I logged in" check.
+
+### 5. Auth-sensitive routes are `ssr: false` — keep new ones consistent
+
+`login.tsx`, `register.tsx`, and `_authed.tsx` all set `ssr: false` because they depend on `localStorage`, which doesn't exist during SSR. If you add a route that reads the token or the user store before render, it needs the same `ssr: false` (or must defer that read to an effect/event handler that only runs client-side).
+
+### 6. Eden Treaty types come from a build artifact — rebuild `packages/api` after backend changes
+
+`import type { App } from 'api'` resolves to `packages/api/dist/index.d.ts`. That's produced by `bun run build` in `packages/api` (or `bunx turbo build --filter=api`), and nothing rebuilds it automatically when you run `bun dev` here. If a route/type looks wrong or missing after a backend change, rebuild the API package before assuming it's a frontend bug.
+
+### 7. Don't hand-roll types for data the API already provides
+
+If `api.<path>.<method>()`'s inferred type is awkward, that's a signal to fix the `model.ts` schema in `packages/api`, not to write a local interface that duplicates (and can drift from) the real contract.
+
+### 8. UI primitives: extend via shadcn, don't hand-roll
+
+Base components in `components/ui/` come from shadcn/ui (`components.json`: style `new-york`, aliases under `#/`). Add new primitives with `bunx --bun shadcn@latest add <component>` — this project uses `bun`, not the `pnpm dlx` command shadcn's own docs default to.
+
+### 9. Import alias `#/*` → `src/*`
+
+Used throughout instead of relative `../../` paths (see `package.json`'s `imports` field and `tsconfig.json`'s `paths`). Follow it in new files.
+
+## Adding a new authenticated feature (checklist)
+
+1. Add the route under `src/routes/_authed/` (inherits the auth guard + hydrated user store).
+2. Add any new API calls to `lib/eden-client.ts`'s `api` usage at the call site — no new client, no raw `fetch`.
+3. If the call needs a new backend route/schema, make that change in `packages/api` first, then `bun run build` there before wiring up the frontend call.
+4. Reuse `components/ui/*` primitives; add new shadcn components via the CLI rather than writing new base primitives.
+
+## Before you finish
+
+- Run `bun run check-types` (`tsc --noEmit`) and `bun run lint`.
+- If you changed anything under `packages/api`, rebuild it (`bun run build` there) before relying on this package's types.
+
+---
+
 <!-- intent-skills:start -->
 # TanStack Intent - before editing files, run the matching guidance command.
 tanstackIntent:

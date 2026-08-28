@@ -1,207 +1,51 @@
-Welcome to your new TanStack Start app!
+# Elysia One — client
 
-# Getting Started
+TanStack Start + React 19 frontend for the `elysia-one` monorepo. Talks to `packages/api` exclusively through an Eden-Treaty-typed client — see the root [`AGENTS.md`](../../AGENTS.md) for the FE/BE contract, and this package's [`AGENTS.md`](./AGENTS.md) for frontend-specific rules before extending it.
 
-To run this application:
+## Stack
+
+- [TanStack Start](https://tanstack.com/start) + [TanStack Router](https://tanstack.com/router) (file-based routing, `src/routes/`)
+- React 19, Tailwind CSS v4, [shadcn/ui](https://ui.shadcn.com/) (`components/ui/`, style: `new-york`)
+- [Zustand](https://zustand.docs.pmnd.rs/) for global client state (currently: the logged-in user)
+- [`@elysia/eden`](https://elysiajs.com/eden/overview.html) (Eden Treaty) for a fully-typed API client generated from `packages/api`'s `App` type
+- JWT bearer auth, token kept in `localStorage`
+
+## Getting started
+
+Requires `packages/api` to be running (for actual requests) **and built at least once** (for types — see "Type safety" below).
 
 ```bash
+cp .env.example .env   # VITE_API_URL, defaults to http://localhost:3000
 bun install
-bun --bun run dev
+bun run dev             # http://localhost:3001
 ```
 
-# Building For Production
+From the repo root, `bun run dev` (Turborepo) starts both `apps/client` and `packages/api` together.
 
-To build this application for production:
+## Building for production
 
 ```bash
-bun --bun run build
+bun run build
+bun run preview
 ```
 
-## Styling
+## Auth
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+- JWT lives in `localStorage` (`src/lib/auth.ts`: `getToken`/`setToken`/`clearToken`), attached as `Authorization: Bearer <token>` by `src/lib/eden-client.ts`.
+- Global "who's logged in" state is a Zustand store (`src/stores/user-store.ts`). `user.id === 0` is the "logged out" sentinel — there's no separate boolean flag.
+- `src/routes/_authed.tsx` is a pathless layout route: it guards on `getToken()`, fetches `/users/me` to hydrate the store, and clears the token + redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
+- `login.tsx` / `register.tsx` are `ssr: false` (token checks are browser-only) and share one form component, `components/auth-form.tsx`.
 
-### Removing Tailwind CSS
+## Type safety (Eden Treaty)
 
-If you prefer not to use Tailwind CSS:
+`src/lib/eden-client.ts` builds its `api` client from `import type { App } from 'api'` — the Elysia app type exported by `packages/api/src/index.ts`. This gives compile-time-checked routes, request bodies, and response shapes with no manually-written API types.
 
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Remove `@tailwindcss/vite` and `tailwindcss` from `package.json`
+This only works once `packages/api` has been built (`bun run build` there, or `bunx turbo build --filter=api` from the root) — that's what produces `dist/index.d.ts`, which is what this package's `types` resolution actually reads. It is **not** rebuilt automatically by `bun run dev`. If routes/types look stale, rebuild `packages/api` first.
 
-## Linting & Formatting
+## Conventions
 
+- Import alias `#/*` → `src/*` (see `tsconfig.json` / `package.json`'s `imports`) — used instead of relative `../../` paths.
+- shadcn/ui components live in `src/components/ui/`; add new ones with `bunx --bun shadcn@latest add <component>` rather than hand-rolling primitives.
+- File-based routing: add a route by adding a file under `src/routes/`; `tsr generate` (wired into `dev`/`build`) regenerates `src/routeTree.gen.ts` — don't hand-edit that file.
 
-This project uses [eslint](https://eslint.org/) and [prettier](https://prettier.io/) for linting and formatting. Eslint is configured using [tanstack/eslint-config](https://tanstack.com/config/latest/docs/eslint). The following scripts are available:
-
-```bash
-bun --bun run lint
-bun --bun run format
-bun --bun run check
-```
-
-
-## Shadcn
-
-Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
-
-```bash
-pnpm dlx shadcn@latest add button
-```
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+See [`AGENTS.md`](./AGENTS.md) for the full list of conventions AI agents and contributors must not break.

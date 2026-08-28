@@ -6,10 +6,10 @@ A Bun + Turborepo monorepo.
 
 ### Apps and Packages
 
-- `apps/client`: a [TanStack Start](https://tanstack.com/start) + React app (auth, eden-treaty API client)
-- `packages/api`: a [Bun](https://bun.sh/) + [Elysia](https://elysiajs.com/) API with [MikroORM](https://mikro-orm.io/) (PostgreSQL) — see `packages/api/README.md` for details
+- `apps/client`: a [TanStack Start](https://tanstack.com/start) + React app — JWT auth (bearer token in `localStorage`), Zustand for global user state, Eden Treaty typed API client. See `apps/client/README.md` / `apps/client/AGENTS.md`.
+- `packages/api`: a [Bun](https://bun.sh/) + [Elysia](https://elysiajs.com/) API with [MikroORM](https://mikro-orm.io/) (PostgreSQL) + BullMQ/Redis. See `packages/api/README.md` / `packages/api/AGENTS.md`.
 
-Each package/app is 100% TypeScript.
+Each package/app is 100% TypeScript. **AI agents and contributors: read `AGENTS.md` (root) before making cross-cutting changes** — it covers the FE/BE contract boundary that the two sub-`AGENTS.md` files don't individually own.
 
 ### Utilities
 
@@ -22,8 +22,12 @@ Each package/app is 100% TypeScript.
 
 ```sh
 bun install
+cp packages/api/.env.example packages/api/.env   # fill in JWT_SECRET, DATABASE_URL, REDIS_URL
+bunx turbo build --filter=api                    # once, so apps/client's Eden Treaty types resolve
 bun run dev
 ```
+
+The `turbo build --filter=api` step matters: `apps/client` gets its API types from `packages/api`'s built `dist/index.d.ts` (Eden Treaty), and `dist/` is gitignored — nothing builds it for you automatically before `dev`. Re-run it whenever `packages/api`'s routes or schemas change.
 
 ### Common commands
 

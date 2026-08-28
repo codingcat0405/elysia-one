@@ -1,6 +1,8 @@
 # Elysia Forge - Elysia + MikroORM + BullMQ template
 
-Production-hardened Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), JWT auth, optional `node:cluster` scaling.
+Production-hardened Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), JWT auth. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
+
+Horizontal scaling is handled by the deployment platform (multiple stateless replicas, e.g. Kubernetes), not by in-process clustering — this template deliberately does not implement `node:cluster`/worker-thread scaling. See "Pool sizing" below.
 
 ## Quick start
 
@@ -29,8 +31,8 @@ Feature-based modules. Per-request `EntityManager` fork happens via Elysia `.der
 
 ```
 src/
-  index.ts                    # boot: env checks, schema sync, cluster fork, graceful shutdown
-  server.ts                   # composes the Elysia app (single process / single cluster worker)
+  index.ts                    # boot: env checks, schema sync, composes + starts the Elysia app,
+                               # graceful shutdown; exports `App` type for Eden Treaty (see below)
   worker.ts                   # separate process: BullMQ Worker(s), no HTTP server
   db.ts                       # cached initORM() — one MikroORM instance per process
   mikro-orm.config.ts         # driver, pool, result-cache adapter config
@@ -79,7 +81,25 @@ If you change an entity, `updateSchema()` picks it up on next boot — no extra 
 
 ### Pool sizing
 
-Per-process pool via `DB_POOL_MAX` (default 10). With `WORKER_THREADS` cluster mode: `total connections = workers × DB_POOL_MAX` — keep it under Postgres `max_connections` with headroom, or put pgBouncer in front.
+Per-process pool via `DB_POOL_MAX` (default 10). Each running instance of the API (each k8s pod replica, each `bun start` process) owns its own pool: `total connections = replicas × DB_POOL_MAX` — keep that under Postgres `max_connections` with headroom, or put pgBouncer in front. This template has no in-process horizontal scaling (see next section); replica count is a deployment-time concern, not something set via an env var here.
+
+### Why no `node:cluster` / worker-threads scaling
+
+Considered and deliberately rejected for this template:
+
+1. Deployments run on Kubernetes (or similar), which already handles horizontal scaling via replica count — an in-process cluster would just duplicate that at a different layer.
+2. Bun's multi-instance-on-one-port mode doesn't reliably tear down forked workers on dev-server stop/hot-reload, leaking background processes during local development.
+
+If you truly need in-process multi-core usage outside k8s, evaluate it as a deliberate, separate change — don't casually re-add a `WORKER_THREADS` env var without re-solving both problems above.
+
+### Eden Treaty type export (end-to-end type safety)
+
+`src/index.ts` exports `export type App = Awaited<ReturnType<typeof main>>` — the full Elysia app type, routes and typebox schemas included. `apps/client` imports it as `import type { App } from 'api'` (workspace dependency) and passes it to `treaty<App>(...)` (`@elysia/eden`) in `apps/client/src/lib/eden-client.ts`, giving the frontend compile-time-checked routes, request bodies, and response shapes with zero manual typing.
+
+This only works if `packages/api`'s declaration output is built: `bun run build` (`tsc --emitDeclarationOnly`) writes `dist/index.d.ts`, which is what `package.json`'s `"types"` field points resolvers at. `dist/` is gitignored and **not** rebuilt automatically by `bun run dev` (Turborepo's `dev` task has no `dependsOn: build`). Practically:
+
+- After cloning, run `bun run build` in `packages/api` (or `bunx turbo build --filter=api`) once before relying on `apps/client`'s eden types.
+- Whenever you add/rename a route, or change a `model.ts` body/response schema, rebuild `packages/api` so `apps/client`'s types stay in sync — otherwise the client either type-checks against a stale contract or silently keeps working with outdated IDE hints until the next build.
 
 ### Background jobs (BullMQ)
 
@@ -99,7 +119,7 @@ Mounted at `/bull-board`, gated by HTTP Basic Auth (`utils/basic-auth.ts`, const
 | Shared client | `utils/redis.ts` (`getRedis()`) | `RedisCacheAdapter`, `RedisLock` | Singleton, retry-limited, safe for normal commands |
 | Dedicated client | `utils/bull-connection.ts` | BullMQ `Queue`/`Worker` | `maxRetriesPerRequest: null`, required for blocking ops |
 
-If `REDIS_URL` is unset, MikroORM falls back to `MemoryCacheAdapter` (per-process, not shared) — fine for dev, not for multi-instance prod caching consistency.
+`mikro-orm.config.ts` still falls back to `MemoryCacheAdapter` (per-process, not shared) when `REDIS_URL` is unset, but `index.ts`'s boot-time required-env check means normal `bun dev`/`bun start` never reaches that path — `REDIS_URL` is mandatory. The fallback only matters for code paths that import `db.ts` without going through `index.ts`'s checks (e.g. a future test harness).
 
 ### Error handling
 
@@ -117,12 +137,11 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 | `DATABASE_URL` | **yes** | — | Postgres connection string |
 | `JWT_SECRET` | **yes** | — | Boot fails fast if missing |
 | `JWT_EXPIRES_IN` | no | `1d` | jsonwebtoken `expiresIn` |
-| `DB_POOL_MIN` / `DB_POOL_MAX` | no | `0` / `10` | Per-process pool; multiply by workers in cluster mode |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | no | `0` / `10` | Per-process pool; multiply by replica count when sizing Postgres `max_connections` |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS` | no | `10000` | Fail fast instead of hanging |
 | `DB_POOL_IDLE_TIMEOUT_MS` | no | `30000` | Keep under infra idle timeouts |
-| `WORKER_THREADS` | no | `1` | `>1` enables `node:cluster` mode |
 | `ENABLE_SWAGGER` | no | auto outside prod | Set `true` to force-enable in prod |
-| `REDIS_URL` | conditionally | — | Required if running the worker (`bun worker`); optional for cache/lock (falls back to in-memory) |
+| `REDIS_URL` | **yes** | — | Boot fails fast if missing (also required for the worker, `bun worker`) |
 | `WORKER_CONCURRENCY` | no | `5` | Jobs processed in parallel, per worker process |
 | `ENABLE_BULL_BOARD` | no | `false` | If `true`, `BULL_BOARD_USER`/`PASSWORD` become required |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` | conditionally | — | HTTP Basic Auth for `/bull-board` |
