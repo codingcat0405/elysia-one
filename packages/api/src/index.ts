@@ -9,7 +9,7 @@ import userController from "./modules/user";
 import Elysia from "elysia";
 import swagger from "@elysiajs/swagger";
 
-for (const key of ["JWT_SECRET", "DATABASE_URL"]) {
+for (const key of ["JWT_SECRET", "DATABASE_URL", "REDIS_URL"]) {
   if (!process.env[key]) {
     throw new Error(`Missing required env var: ${key}`);
   }

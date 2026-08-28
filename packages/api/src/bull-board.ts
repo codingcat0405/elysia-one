@@ -6,7 +6,8 @@ import { userQueue } from './modules/user/queue'
 import { requireBasicAuth } from './utils/basic-auth';
 
 // Exposes internal job payloads/data — must never be public.
-// Mounted at /api/admin/queues (see server.ts), gated by admin JWT auth.
+// Mounted at top-level /bull-board (see index.ts), gated by HTTP Basic Auth
+// (requireBasicAuth below) — not JWT. Keep it that way (see AGENTS.md).
 export async function createBullBoardPlugin() {
   const serverAdapter = new ElysiaAdapter({
     prefix: '/bull-board',
