@@ -1,0 +1,145 @@
+# Full local stack: postgres, redis, api, worker, client.
+#
+# Quick start:
+#   cp .env.example .env   # fill BETTER_AUTH_SECRET at minimum
+#   docker compose up --build
+#   open http://localhost:3001
+#
+# ─────────────────────────────────────────────────────────────────────────
+# Why `client` uses network_mode: host (read this before changing it)
+# ─────────────────────────────────────────────────────────────────────────
+# apps/client/Dockerfile bakes VITE_API_URL into the build as a Vite
+# BUILD-TIME value (see that Dockerfile's comments) — it is used by BOTH
+# the browser bundle (fetches from the user's machine) and the SSR server
+# bundle (fetches from inside the client container). Those two callers
+# need different addresses on a normal bridge network: the browser needs
+# `http://localhost:3000` (the api service's published host port), but
+# `localhost` from *inside* a bridge-networked client container refers to
+# that container itself, not the api container — SSR-side fetches would
+# get connection-refused. `network_mode: host` (Linux only) makes the
+# client container share the host's network namespace, so `localhost`
+# means the same thing everywhere and one VITE_API_URL value works for
+# both. This is a pragmatic choice for local testing, not a production
+# deployment topology (host networking has no port isolation and doesn't
+# work the same way on Docker Desktop for Mac/Windows). A production setup
+# would instead give the SSR fetch its own server-only env var pointing at
+# the api's *internal* address — that's an application code change
+# (apps/client/src/lib/eden-client.ts, auth-client.ts), out of scope here.
+# Because of network_mode: host, `ports:` is omitted for `client` — it
+# binds directly to the host's port 3001 (its PORT env var below).
+
+services:
+  # postgres and redis are NOT published to the host by default: api/worker
+  # reach them over the compose network by service name (postgres:5432,
+  # redis:6379), which is all the stack itself needs. Publishing 5432/6379
+  # unconditionally is a common source of "port already in use" failures on
+  # any machine that (like this one) already runs a local Postgres/Redis for
+  # `bun dev` — see AGENTS.md/README for that non-Docker setup. If you want
+  # host-side access (e.g. `psql -h localhost -p 5433`) for debugging the
+  # containerized DB specifically, add a `ports:` block back with a
+  # non-colliding host port, e.g. `- '5433:5432'` / `- '6380:6379'`.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: elysia-one
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/elysia-one
+      REDIS_URL: redis://redis:6379
+      # Signs/verifies session tokens — required, no default. Set in .env
+      # (see root .env.example) or the shell environment before `up`.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET — see root .env.example}
+      # Public origin THIS container is reachable at from the browser —
+      # used to construct the Google OAuth callback URL.
+      BETTER_AUTH_URL: http://localhost:3000
+      # Browser origin of the client — CORS allowlist + Better Auth's
+      # trustedOrigins. Must match where the browser actually loads the
+      # app (client's published/host-network port below).
+      CLIENT_URL: http://localhost:3001
+      # Optional, paired — leave both unset to run username/password only.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NODE_ENV: production
+    ports:
+      - '3000:3000'
+    healthcheck:
+      # oven/bun:slim has no curl — use bun's built-in fetch instead.
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    # Overrides the Dockerfile's default CMD (the HTTP server) — same
+    # image, same WORKDIR (/app/packages/api), different entry point.
+    command: ['bun', 'run', 'src/worker.ts']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/elysia-one
+      REDIS_URL: redis://redis:6379
+      # worker.ts's own boot-time env check requires this too (mirrors
+      # index.ts's check), even though the worker process itself never
+      # calls Better Auth directly — confirmed empirically (this file was
+      # missing it on the first real `docker compose up`, worker crashed).
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET — see root .env.example}
+      WORKER_CONCURRENCY: 5
+      NODE_ENV: production
+
+  client:
+    build:
+      context: .
+      dockerfile: apps/client/Dockerfile
+      args:
+        # Build-time value baked into the bundle — see the file-level
+        # comment above for why this is localhost, not a service name.
+        VITE_API_URL: http://localhost:3000
+    network_mode: host
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+
+volumes:
+  postgres-data:
