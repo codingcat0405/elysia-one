@@ -1,23 +1,28 @@
 import process from "node:process";
+import { RequestContext } from "@mikro-orm/postgresql";
 import { initORM } from "./db";
+import { initAuth } from "./auth";
 import logger from "./utils/logger";
 import cors from "@elysiajs/cors";
 import { setup } from "./middlewares/setup";
 import responseMiddleware from "./middlewares/responseMiddleware";
 import errorMiddleware from "./middlewares/errorMiddleware";
-import userController from "./modules/user";
+import profileController from "./modules/profile";
 import Elysia from "elysia";
 import swagger from "@elysiajs/swagger";
 
-for (const key of ["JWT_SECRET", "JWT_REFRESH_SECRET", "DATABASE_URL", "REDIS_URL"]) {
+for (const key of ["BETTER_AUTH_SECRET", "DATABASE_URL", "REDIS_URL"]) {
   if (!process.env[key]) {
     throw new Error(`Missing required env var: ${key}`);
   }
 }
-// Identical secrets would let an access token be replayed as a refresh token
-// (and vice versa) at /api/users/refresh — silently defeats the two-secret design.
-if (process.env.JWT_REFRESH_SECRET === process.env.JWT_SECRET) {
-  throw new Error("JWT_REFRESH_SECRET must not equal JWT_SECRET");
+// Google sign-in is opt-in and must stay fully optional (no Google Cloud
+// Console credentials required to boot this template) — but exactly one var
+// set is unambiguously a misconfiguration, not a valid "disabled" state.
+if (Boolean(process.env.GOOGLE_CLIENT_ID) !== Boolean(process.env.GOOGLE_CLIENT_SECRET)) {
+  throw new Error(
+    "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in, or both left unset to disable it",
+  );
 }
 if (process.env.ENABLE_BULL_BOARD === "true") {
   if (!process.env.BULL_BOARD_USER || !process.env.BULL_BOARD_PASSWORD) {
@@ -30,6 +35,7 @@ if (process.env.ENABLE_BULL_BOARD === "true") {
 const main = async () => {
   const { orm } = await initORM();
   await orm.schema.updateSchema();
+  const auth = await initAuth();
   // load lazily: @bull-board/elysia sync-requires elysia internally, which under
   // Bun must not run before elysia has been ES-imported (memoirist is async)
   const bullBoardPlugin =
@@ -45,12 +51,24 @@ const main = async () => {
 
   const app = new Elysia()
     .use(cors({ origin: clientOrigins, credentials: true }))
+    // `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly — it does NOT
+    // fork the EntityManager itself (confirmed in Phase 01: it throws
+    // MikroORM's own "Using global EntityManager instance methods ..."
+    // ValidationError without this wrapper). RequestContext.create() is
+    // MikroORM's documented fix for exactly this situation (third-party code
+    // holding a reference to the global `em`): every `orm.em.*` call made
+    // inside this callback transparently resolves to a per-request fork via
+    // AsyncLocalStorage, with no `allowGlobalContext` escape hatch needed.
+    // Placed BEFORE `.use(setup)` so this mount never pays for a
+    // `setup`-derived `em.fork()` it never uses (setup.ts's fork is a
+    // separate, independent context and is unaffected).
+    .mount((request) => RequestContext.create(orm.em, () => auth.handler(request)))
     .use(setup)
     .onAfterHandle(responseMiddleware)
     .onError(errorMiddleware)
     .get("/", () => "It's works!")
     .get("/health", () => ({ status: "ok" }))
-    .group("/api", (group) => group.use(userController));
+    .group("/api", (group) => group.use(profileController));
   if (bullBoardPlugin) app.use(bullBoardPlugin);
   // compose everything BEFORE listen — never .use() after the server is live
   if (process.env.ENABLE_SWAGGER === "true") {
@@ -66,12 +84,12 @@ const main = async () => {
           },
           components: {
             securitySchemes: {
-              JwtAuth: {
+              SessionCookie: {
                 type: "apiKey",
                 in: "cookie",
-                name: "access_token",
+                name: "better-auth.session_token",
                 description:
-                  "httpOnly access_token cookie, set by POST /api/users/login. Call login here first (same origin as this Swagger UI) — the browser stores the cookie and every subsequent \"Try it out\" call carries it automatically; there is no bearer token to paste.",
+                  "Better Auth session cookie. Sign in via POST /api/auth/sign-in/username (same origin as this Swagger UI); the browser stores the cookie and subsequent \"Try it out\" calls carry it.",
               },
             },
           },

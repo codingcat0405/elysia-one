@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export type User = {
-  id: number
+  id: string
   username: string
   role: string
 }
@@ -13,13 +13,14 @@ export type UserStore = {
 }
 
 const defaultUser: User = {
-  id: 0,
+  id: '',
   username: '',
   role: 'user',
 }
 
-// `user.id === 0` means "not logged in" — mirrors the old web app so the Header
-// can branch on it without a separate flag.
+// `user.id === ''` means "not logged in" — Better Auth IDs are UUID strings, so
+// the empty string replaces `0` as the logged-out sentinel. Keeps the Header
+// branching on the store without a separate `isAuthenticated` flag.
 export const useUserStore = create<UserStore>((set) => ({
   user: defaultUser,
   setUser: (user) => set({ user }),

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Button } from '#/components/ui/button.tsx'
 import ThemeToggle from './ThemeToggle'
-import { api, unwrap } from '#/lib/eden-client.ts'
+import { authClient } from '#/lib/auth-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
 import type { User } from '#/stores/user-store.ts'
 
@@ -11,8 +11,8 @@ import type { User } from '#/stores/user-store.ts'
 // on the client, is also still empty on the very first render (before this
 // component's mount effect runs) — so both first renders agree with each
 // other by preferring `initialUser` until hydration, avoiding a
-// logged-out-then-flip flash. `hydrated` (not `user.id === 0`) gates the
-// switch to the live store: `id === 0` alone can't tell "not yet seeded" apart
+// logged-out-then-flip flash. `hydrated` (not `user.id === ''`) gates the
+// switch to the live store: `id === ''` alone can't tell "not yet seeded" apart
 // from "just explicitly logged out", which would otherwise mask a real
 // clearUser() behind the stale initialUser until the next navigation resolves.
 export default function Header({ initialUser }: { initialUser: User | null }) {
@@ -26,13 +26,13 @@ export default function Header({ initialUser }: { initialUser: User | null }) {
   }, [initialUser, setUser])
 
   const displayUser = hydrated ? user : initialUser
-  const isAuthed = displayUser != null && displayUser.id !== 0
+  const isAuthed = displayUser != null && displayUser.id !== ''
 
   const handleLogout = async () => {
     // Clear local state and navigate even if the network call fails —
     // otherwise a user with no connectivity can never log out.
     try {
-      await unwrap(api.users.logout.post())
+      await authClient.signOut()
     } catch {
       // ignore — cookies may already be gone/expired, that's still "logged out"
     } finally {

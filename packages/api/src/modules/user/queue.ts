@@ -3,9 +3,10 @@ import { bullConnection } from '../../utils/bull-connection';
 
 
 // job data becomes a union, discriminated by job.name:
+// userId is a Better Auth UUID string (was a numeric PK pre-migration).
 export type UserJob =
-  | { type: 'send-welcome-email'; userId: number; username: string }
-  | { type: 'send-password-reset'; userId: number; token: string }
+  | { type: 'send-welcome-email'; userId: string; username: string }
+  | { type: 'send-password-reset'; userId: string; token: string }
 
 export const USER_QUEUE_NAME = 'user'
 

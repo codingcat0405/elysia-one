@@ -1,6 +1,5 @@
 import { Elysia } from 'elysia'
 import { initORM } from '../db'
-import { UserService } from '../modules/user/service'
 
 
 // One fork per request, shared by every service in that request (one Unit of Work).
@@ -16,9 +15,8 @@ export const setup = new Elysia({ name: 'setup' }).derive(
     const em = orm.em.fork()
     return {
       em,
-      userService: new UserService(em),
-      // add more services here; services needing other services share the same em:
-      // orderService: new OrderService(em, userService),
+      // add services here as they're introduced; services needing other
+      // services share the same em: someService: new SomeService(em),
     }
   },
 )

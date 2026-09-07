@@ -5,7 +5,7 @@ import { USER_QUEUE_NAME } from './modules/user/queue'
 import { createUserJobProcessor } from './modules/user/worker'
 import { bullConnection } from './utils/bull-connection'
 
-for (const key of ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL']) {
+for (const key of ['BETTER_AUTH_SECRET', 'DATABASE_URL', 'REDIS_URL']) {
   if (!process.env[key]) throw new Error(`Missing required env var: ${key}`)
 }
 

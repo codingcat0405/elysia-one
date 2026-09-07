@@ -13,7 +13,7 @@ Read `README.md` first for the architecture overview. This file is the "don't br
 - HTTP requests get their fork from `middlewares/setup.ts`'s `.derive()`.
 - BullMQ jobs get their fork inline in the module's `worker.ts` (one `orm.em.fork()` per job — see `modules/user/worker.ts`).
 
-If you're writing a query and typed `orm.em` instead of `em`/`userService` (or your new service), stop — that's the bug this template was hardened against. `grep -rn "orm.em" src` should only ever match `db.ts`, `setup.ts`, and the `orm.em.fork()` line inside each module's `worker.ts`.
+If you're writing a query and typed `orm.em` instead of `em` (or a service built from it), stop — that's the bug this template was hardened against. `grep -rn "orm.em" src` matches `db.ts`, `setup.ts`, the `orm.em.fork()` line inside each module's `worker.ts`, and two `RequestContext.create(orm.em, ...)` call sites (`index.ts`'s `.mount()`, `macros/auth.ts`'s `checkAuth`) — both are the same fork-per-unit-of-work discipline applied to `better-auth-mikro-orm`, which does not fork the `EntityManager` on its own (see §11). Any other match is the bug.
 
 ### 2. Services are per-unit-of-work, never singletons
 
@@ -26,13 +26,13 @@ Adding a new service = add a class taking `em` (and any other already-constructe
 
 ### 3. New controllers must `.use(setup)` (and `.use(authMacro)` if auth is needed) themselves
 
-Elysia dedupes plugins by `name` (`setup` has `{ name: 'setup' }`), so calling `.use(setup)` in both `index.ts` and a controller is cheap and safe at runtime — it does not double-fork the `em`. But TypeScript resolves each file's context from its own composition chain, not its parent's. Skip `.use(setup)` in a new controller and `em`/`userService`-equivalents won't type-check inside it, even though it'd work at runtime because `index.ts` already composed it globally. Copy the pattern in `modules/user/index.ts`.
+Elysia dedupes plugins by `name` (`setup` has `{ name: 'setup' }`), so calling `.use(setup)` in both `index.ts` and a controller is cheap and safe at runtime — it does not double-fork the `em`. But TypeScript resolves each file's context from its own composition chain, not its parent's. Skip `.use(setup)` in a new controller and `em`-equivalents won't type-check inside it, even though it'd work at runtime because `index.ts` already composed it globally. Copy the pattern in `modules/profile/index.ts`. (`.use(setup)` currently yields only `em` — there is no service registered in `setup.ts`'s `.derive()` yet; add one there when the first feature module needs it.)
 
 ### 4. One Queue per domain module, dispatch by job name
 
 Don't create a new BullMQ `Queue` per job type. Follow `modules/user/queue.ts`: one queue per module, job payload is a discriminated union keyed by `type`/`name`, and the module's `worker.ts` dispatches via `switch (job.name)`. Register every new module's `Worker` in the top-level `src/worker.ts` (a **separate process** — `bun worker`/`bun worker:dev` — never import/start a `Worker` from `index.ts` or any HTTP-path code).
 
-Enqueue jobs only **after** the DB write that triggered them has flushed successfully (see `UserService.register` — enqueue happens after `em.flush()`, not before). Enqueuing first risks a job referencing a row that got rolled back.
+Enqueue jobs only **after** the DB write that triggered them has committed (see `auth.ts`'s `databaseHooks.user.create.after` — Better Auth calls it only once the new user row is committed, and the hook enqueues from inside that callback). Enqueuing first risks a job referencing a row that got rolled back.
 
 ### 5. Two Redis connections, never merge them
 
@@ -63,13 +63,15 @@ This template deliberately does **not** implement `node:cluster`/worker-thread s
 
 `DB_POOL_MAX` is a **per-process** pool; total Postgres connections = `replica count × DB_POOL_MAX`. Check that against Postgres `max_connections` when changing pool defaults or replica count — this is a deployment-config concern, not something read from an env var in this codebase.
 
-### 10. Bull Board is Basic-Auth gated, not JWT — keep it that way
+### 10. Bull Board is Basic-Auth gated, not the Better Auth session — keep it that way
 
-`/bull-board` uses `utils/basic-auth.ts` (constant-time `timingSafeEqual` compare) deliberately, because it's a browser-native dashboard without access to the app's JWT cookies. `index.ts` fails boot fast if `ENABLE_BULL_BOARD=true` without credentials set — preserve that fail-fast check if you touch boot-time env validation.
+`/bull-board` uses `utils/basic-auth.ts` (constant-time `timingSafeEqual` compare) deliberately, because it's a browser-native dashboard without access to the app's session cookie. `index.ts` fails boot fast if `ENABLE_BULL_BOARD=true` without credentials set — preserve that fail-fast check if you touch boot-time env validation.
 
-### 11. Auth cookies are read/written in exactly one place
+### 11. No application code reads or writes an auth cookie
 
-Cookie read/write logic lives in `utils/auth-tokens.ts` only: `signTokenPair()`, `setAuthCookies()`, `clearAuthCookies()`, `verifyRefreshToken()`. Services (e.g. `UserService`) stay HTTP-agnostic and never touch Elysia's `cookie` context. Controllers (`modules/user/index.ts`) and the auth macro (`macros/auth.ts`) are the only other places that call these utilities. If you need to add a new token-handling function, put it in `auth-tokens.ts` — don't scatter cookie logic across modules.
+Better Auth's mounted handler (`auth.handler`, wired in `index.ts`'s `.mount()`) issues and clears the `better-auth.session_token` cookie entirely on its own. The only session *read* anywhere in this codebase is `auth.api.getSession({ headers })` inside `macros/auth.ts`, which hands Better Auth the real request headers and never touches `cookie` itself. If you find yourself reaching for Elysia's `cookie` context to set, read, or clear anything auth-related, stop — the design has been misunderstood; route it through `auth.ts` / the mounted handler instead.
+
+One narrow, necessary exception to the broader "never touch the global `EntityManager`" rule above: `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly and does not fork the `EntityManager` itself. Both the `.mount()` call in `index.ts` and `checkAuth`'s `auth.api.getSession()` call in `macros/auth.ts` wrap their Better Auth calls in MikroORM's `RequestContext.create(orm.em, () => ...)` to work around this — that AsyncLocalStorage-based fork is what invariant #1 is actually enforcing there, just via a different mechanism than `setup.ts`'s `em.fork()`. Don't remove it as if it were a stray `orm.em` violation.
 
 ### 12. `export type App` (`index.ts`) is a public contract for `apps/client`
 
@@ -80,14 +82,14 @@ Cookie read/write logic lives in `utils/auth-tokens.ts` only: `signTokenPair()`,
 
 ## Adding a new feature module (checklist)
 
-Mirror `src/modules/user/`:
+Mirror `src/modules/profile/` — the reference module post-migration. It has no `service.ts` (its two routes only echo `checkAuth`'s resolved `user`, no DB access of their own); add one only once the module actually needs a query:
 
 1. `modules/<name>/model.ts` — typebox request/response schemas.
-2. `modules/<name>/service.ts` — plain class, `em` (and any dependency services) via constructor, throws `HttpError` subclasses.
+2. `modules/<name>/service.ts` — plain class, `em` (and any dependency services) via constructor, throws `HttpError` subclasses. Skip this file if the module has nothing to query/mutate yet.
 3. `modules/<name>/index.ts` — Elysia controller: `.use(setup)`, `.use(authMacro)` if it needs auth, routes with `body`/`response` schemas from `model.ts`.
-4. Register the new service in `middlewares/setup.ts`'s `.derive()`.
+4. If you added a service, register it in `middlewares/setup.ts`'s `.derive()`.
 5. Mount the controller in `index.ts`'s `/api` group.
-6. Only if the feature needs background work: `modules/<name>/queue.ts` (one `Queue`, discriminated job union) + `modules/<name>/worker.ts` (processor, `switch (job.name)`), then register the `Worker` in `src/worker.ts`.
+6. Only if the feature needs background work: `modules/<name>/queue.ts` (one `Queue`, discriminated job union) + `modules/<name>/worker.ts` (processor, `switch (job.name)`), then register the `Worker` in `src/worker.ts` — see `modules/user/queue.ts` + `worker.ts`, which stayed in place across the auth migration purely for their BullMQ job (`send-welcome-email`), not for any HTTP routes.
 
 ## Before you finish
 

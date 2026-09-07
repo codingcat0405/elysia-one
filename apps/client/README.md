@@ -8,7 +8,7 @@ TanStack Start + React 19 frontend for the `elysia-one` monorepo. Talks to `pack
 - React 19, Tailwind CSS v4, [shadcn/ui](https://ui.shadcn.com/) (`components/ui/`, style: `new-york`)
 - [Zustand](https://zustand.docs.pmnd.rs/) for global client state (currently: the logged-in user)
 - [`@elysia/eden`](https://elysiajs.com/eden/overview.html) (Eden Treaty) for a fully-typed API client generated from `packages/api`'s `App` type
-- JWT auth via httpOnly cookies (access + refresh token pair); auth state derived from `GET /users/me`
+- [Better Auth](https://better-auth.com) (username/password + Google OAuth) via `src/lib/auth-client.ts` — the one sanctioned non-Eden path to the API; session is an httpOnly cookie
 
 ## Getting started
 
@@ -31,10 +31,10 @@ bun run preview
 
 ## Auth
 
-- JWT access and refresh tokens are stored in httpOnly cookies (set by the server on `/users/login` and `/users/register`). They're never readable from JavaScript — auth state is derived by calling `GET /users/me` via `unwrapAuthed()` in `src/lib/eden-client.ts`.
-- Global "who's logged in" state is a Zustand store (`src/stores/user-store.ts`). `user.id === 0` is the "logged out" sentinel — there's no separate boolean flag.
-- `src/routes/_authed.tsx` is a pathless layout route: its loader calls `fetchMe()` (SSR-aware, server-side calls `/users/me` with the httpOnly cookie), hydrates the store, and redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
-- `login.tsx` / `register.tsx` are **SSR-enabled** (not `ssr: false`) because the httpOnly cookie is available to the server on the initial request, and share one form component, `components/auth-form.tsx`.
+- Better Auth issues an httpOnly `better-auth.session_token` cookie on sign-in/sign-up (username/password or Google). It's never readable from JavaScript — auth state is derived by calling `getSessionUser()` in `src/lib/auth-client.ts`, which wraps Better Auth's own `authClient.getSession()`.
+- Global "who's logged in" state is a Zustand store (`src/stores/user-store.ts`). `user.id === ''` is the "logged out" sentinel (Better Auth IDs are UUID strings) — there's no separate boolean flag.
+- `src/routes/_authed.tsx` is a pathless layout route: its loader calls `getSessionUser()` (SSR-aware — forwards the incoming request's `Cookie` header during SSR), hydrates the store, and redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
+- `login.tsx` / `register.tsx` are **SSR-enabled** (not `ssr: false`) because the httpOnly cookie is available to the server on the initial request, and share one form component, `components/auth-form.tsx`. Login is **username-only** (no email fallback — the installed `better-auth` version's `username` plugin has no such option); registration calls `authClient.signUp.email(...)` with `username` passed as an extra field, since there is no `signUp.username`.
 
 ## Type safety (Eden Treaty)
 

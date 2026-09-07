@@ -2,7 +2,7 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import Header from '../components/Header'
-import { fetchMe } from '../lib/eden-client'
+import { getSessionUser } from '../lib/auth-client'
 
 import appCss from '../styles.css?url'
 
@@ -13,12 +13,13 @@ export const Route = createRootRoute({
   // this loader gives it a same-request-consistent initial user so the very
   // first paint (server and client, pre-hydration) already shows the right
   // state instead of flashing logged-out. `_authed`'s loader duplicates this
-  // /users/me call for its own route — both are cheap (one JWT verify), and
-  // TanStack Router doesn't dedupe loaders across route levels; not worth
-  // engineering shared request-level caching for it.
+  // session lookup for its own route — both now cost a DB round-trip (not a
+  // free JWT verify, unlike the old token scheme), and TanStack Router
+  // doesn't dedupe loaders across route levels; not worth engineering shared
+  // request-level caching for it.
   loader: async () => {
-    const user = await fetchMe()
-    return { user: user ? { id: user.id, username: user.username, role: user.role } : null }
+    const user = await getSessionUser()
+    return { user }
   },
   head: () => ({
     meta: [

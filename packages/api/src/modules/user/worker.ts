@@ -1,6 +1,6 @@
 import type { Job } from 'bullmq'
 import type { MikroORM } from '@mikro-orm/postgresql'
-import { User } from '../../entities/User'
+import { AuthUser } from '../../entities/AuthUser'
 import logger from '../../utils/logger'
 import { UserJob } from './queue'
 
@@ -12,14 +12,16 @@ export function createUserJobProcessor(orm: MikroORM) {
 
     switch (job.name) {
       case 'send-welcome-email': {
-        const user = await em.findOne(User, { id: job.data.userId })
+        // job.data.userId is a Better Auth UUID string.
+        const user = await em.findOne(AuthUser, { id: job.data.userId })
         if (!user) {
           // don't retry forever for a user that no longer exists
           logger.warn(`send-welcome-email: user ${job.data.userId} not found, skipping`)
           return
         }
         // TODO: plug in real email provider
-        logger.info(`Sending welcome email to ${user.username}`)
+        // Google sign-ins never collect a username; fall back to email.
+        logger.info(`Sending welcome email to ${user.username ?? user.email}`)
         return
       }
       default:

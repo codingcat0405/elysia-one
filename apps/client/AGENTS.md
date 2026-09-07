@@ -4,25 +4,25 @@ Guide for AI coding agents (Claude Code, Cursor, Copilot, Aider, ...) working in
 
 ## Non-negotiable invariants
 
-### 1. All API calls go through `lib/eden-client.ts` — never a raw `fetch`
+### 1. All non-auth API calls go through `lib/eden-client.ts` — never a raw `fetch`
 
-Every request to `packages/api` uses `api.<path>.<method>()` (Eden Treaty, typed from the `App` type) plus the `unwrap()` helper from the same file, which turns Eden's `{ data, error }` result into throw-on-error/return-on-success so callers can use plain `try/catch`. Don't call `fetch`/`axios` against the API directly, and don't add a second API client.
+Every request to `packages/api` other than authentication uses `api.<path>.<method>()` (Eden Treaty, typed from the `App` type) plus the `unwrap()` helper from the same file, which turns Eden's `{ data, error }` result into throw-on-error/return-on-success so callers can use plain `try/catch`. **Scoped exception:** `lib/auth-client.ts` (Better Auth's own client) is the one sanctioned non-Eden path, and only for sign-up, sign-in (username/password and Google), sign-out, and session lookup — see root `AGENTS.md`'s "The FE/BE contract" §5. Don't call `fetch`/`axios` against the API directly, and don't add a third client.
 
-### 2. Auth token is an httpOnly cookie, never read from JavaScript
+### 2. Session is an httpOnly cookie, read via `auth-client.ts`, never from JavaScript
 
-The access/refresh token pair is stored in httpOnly cookies that cannot be read from JavaScript. To check whether the user is logged in, call `unwrapAuthed()` which invokes `GET /users/me` via the Eden client (server can read the cookie and echo back the user). Never store, read, or clear tokens from JavaScript — that logic is server-side only (Elysia's `setAuthCookies()`, `clearAuthCookies()` in `packages/api/src/utils/auth-tokens.ts`).
+Better Auth's `better-auth.session_token` cookie is httpOnly and cannot be read from JavaScript. To check whether the user is logged in, call `getSessionUser()` (`src/lib/auth-client.ts`), which wraps `authClient.getSession()` and collapses every failure (network error, no session, API down) to `null`. Never store, read, or clear the session cookie from JavaScript — that's entirely server-side, owned by Better Auth's mounted handler in `packages/api`.
 
-### 3. Global user state: `stores/user-store.ts`, `user.id === 0` means logged out
+### 3. Global user state: `stores/user-store.ts`, `user.id === ''` means logged out
 
-The Zustand store is the single source of truth for "who's logged in" across the app (e.g. `Header.tsx` branches on it). It uses `user.id === 0` as the logged-out sentinel — not a separate `isAuthenticated` boolean — to mirror the previous app's model. Keep using that sentinel if you touch this store; don't add a parallel auth-state mechanism (e.g. React context) that can drift out of sync with it.
+The Zustand store is the single source of truth for "who's logged in" across the app (e.g. `Header.tsx` branches on it). `User.id` is a string (Better Auth UUIDs, not the old integer PK), so the logged-out sentinel is `user.id === ''` — not a separate `isAuthenticated` boolean. Keep using that sentinel if you touch this store; don't add a parallel auth-state mechanism (e.g. React context) that can drift out of sync with it.
 
 ### 4. `_authed.tsx` is the only place that authenticates + hydrates the user store
 
-It's a pathless layout route: its `loader` calls `fetchMe()` (SSR-aware) and on any failure clears the store and redirects to `/login`. Because the token is httpOnly, the server can read it from cookies on the initial request (no synchronous JS-side pre-check possible). New authenticated screens go under `routes/_authed/` as children of this layout so they inherit the guard — don't re-implement a per-route "am I logged in" check.
+It's a pathless layout route: its `loader` calls `getSessionUser()` (`lib/auth-client.ts`, SSR-aware) and redirects to `/login` on any failure. Because the session cookie is httpOnly, the server can read it on the initial request (no synchronous JS-side pre-check possible). New authenticated screens go under `routes/_authed/` as children of this layout so they inherit the guard — don't re-implement a per-route "am I logged in" check.
 
 ### 5. Auth routes are SSR-enabled because the httpOnly cookie reaches the server
 
-`login.tsx`, `register.tsx`, and `_authed.tsx` are **not** `ssr: false` (and must **not** be marked `ssr: false`). Because the httpOnly token cookie is sent automatically on every request, these routes can read the session server-side during SSR: the server calls `/users/me` and populates the user before hydration. If you add a new auth-touching route, do **not** add `ssr: false` — keep SSR enabled so the server can read the cookie and set up the page correctly on the first request. Routes that talk to APIs expecting an authenticated session **must** be SSR-enabled.
+`login.tsx`, `register.tsx`, and `_authed.tsx` are **not** `ssr: false` (and must **not** be marked `ssr: false`). Because the httpOnly session cookie is sent automatically on every request, these routes can read the session server-side during SSR: the server calls `getSessionUser()` and populates the user before hydration. If you add a new auth-touching route, do **not** add `ssr: false` — keep SSR enabled so the server can read the cookie and set up the page correctly on the first request. Routes that talk to APIs expecting an authenticated session **must** be SSR-enabled.
 
 ### 5.5. Zustand store is process-global on SSR servers — never write request state to it in loaders
 
@@ -47,7 +47,7 @@ Used throughout instead of relative `../../` paths (see `package.json`'s `import
 ## Adding a new authenticated feature (checklist)
 
 1. Add the route under `src/routes/_authed/` (inherits the auth guard + hydrated user store).
-2. Add any new API calls to `lib/eden-client.ts`'s `api` usage at the call site — no new client, no raw `fetch`.
+2. Add any new API calls to `lib/eden-client.ts`'s `api` usage at the call site — no new client, no raw `fetch`. (Auth flows are the one exception, already covered by `lib/auth-client.ts`.)
 3. If the call needs a new backend route/schema, make that change in `packages/api` first, then `bun run build` there before wiring up the frontend call.
 4. Reuse `components/ui/*` primitives; add new shadcn components via the CLI rather than writing new base primitives.
 

@@ -10,7 +10,7 @@ import {
 import { Input } from '#/components/ui/input.tsx'
 import { Label } from '#/components/ui/label.tsx'
 
-export type Credentials = { username: string; password: string }
+export type Credentials = { username: string; password: string; email?: string }
 
 type AuthFormProps = {
   title: string
@@ -21,6 +21,13 @@ type AuthFormProps = {
   footer: React.ReactNode
   /** `current-password` for login, `new-password` for register */
   passwordAutoComplete: 'current-password' | 'new-password'
+  /** Register needs a real email input; login doesn't. Default false. */
+  emailField?: boolean
+  /** Defaults to "Username". */
+  usernameLabel?: string
+  /** Redirects the browser away — see the call site comment for why this
+   * isn't wired through the form's own submit/loading state. */
+  onGoogle?: () => void
 }
 
 // Shared login / register form. Both screens differ only in copy + submit handler.
@@ -31,10 +38,14 @@ export function AuthForm({
   onSubmit,
   footer,
   passwordAutoComplete,
+  emailField = false,
+  usernameLabel = 'Username',
+  onGoogle,
 }: AuthFormProps) {
   const [credentials, setCredentials] = useState<Credentials>({
     username: '',
     password: '',
+    email: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -65,7 +76,7 @@ export function AuthForm({
         <CardContent>
           <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="username">{usernameLabel}</Label>
               <Input
                 id="username"
                 autoComplete="username"
@@ -76,6 +87,21 @@ export function AuthForm({
                 required
               />
             </div>
+            {emailField ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={credentials.email}
+                  onChange={(e) =>
+                    setCredentials((c) => ({ ...c, email: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+            ) : null}
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -98,6 +124,23 @@ export function AuthForm({
               {loading ? 'Please wait…' : submitLabel}
             </Button>
           </form>
+          {onGoogle ? (
+            <>
+              <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={onGoogle}
+              >
+                Continue with Google
+              </Button>
+            </>
+          ) : null}
           <p className="mt-4 text-center text-sm text-muted-foreground">
             {footer}
           </p>

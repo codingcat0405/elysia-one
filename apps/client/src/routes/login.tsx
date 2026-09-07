@@ -6,27 +6,34 @@ import {
 } from '@tanstack/react-router'
 import { AuthForm } from '#/components/auth-form.tsx'
 import type { Credentials } from '#/components/auth-form.tsx'
-import { api, fetchMe, unwrap } from '#/lib/eden-client.ts'
-import { useUserStore } from '#/stores/user-store.ts'
+import { authClient, getSessionUser } from '#/lib/auth-client.ts'
 
 export const Route = createFileRoute('/login')({
-  // Cookie is unreadable from JS — check runs server-side (or client, on
-  // client-side nav) via /users/me instead of a synchronous token read.
+  // Session cookie is httpOnly — check runs server-side (or client, on
+  // client-side nav) via getSessionUser() instead of a synchronous token read.
   beforeLoad: async () => {
-    if (await fetchMe()) throw redirect({ to: '/' })
+    if (await getSessionUser()) throw redirect({ to: '/' })
   },
   component: LoginPage,
 })
 
 function LoginPage() {
   const navigate = useNavigate()
-  const setUser = useUserStore((s) => s.setUser)
 
   const handleLogin = async ({ username, password }: Credentials) => {
-    // The API already set the auth cookies on this response — nothing to store.
-    const data = await unwrap(api.users.login.post({ username, password }))
-    setUser(data.user)
+    // The installed better-auth version's username plugin looks up strictly by
+    // the `username` field (no email fallback) — login is username-only.
+    const { error } = await authClient.signIn.username({ username, password })
+    if (error) throw error // AuthForm renders error.message inline
+    // Do not call setUser here: _authed's loader/effect owns store hydration.
     await navigate({ to: '/' })
+  }
+
+  const handleGoogle = () => {
+    void authClient.signIn.social({
+      provider: 'google',
+      callbackURL: `${window.location.origin}/`,
+    })
   }
 
   return (
@@ -36,6 +43,7 @@ function LoginPage() {
       submitLabel="Sign in"
       passwordAutoComplete="current-password"
       onSubmit={handleLogin}
+      onGoogle={handleGoogle}
       footer={
         <>
           No account?{' '}
