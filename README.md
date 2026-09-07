@@ -37,10 +37,14 @@ Run for all workspaces (via Turborepo):
 
 ```sh
 bun run build
-bun run dev
+bun run dev          # api (HTTP) + client — does NOT start the background worker
+bun run dev:worker   # BullMQ worker (packages/api/src/worker.ts), separate process
 bun run lint
 bun run check-types
+bun run test         # packages/api's tests need Postgres + Redis reachable (real .env)
 ```
+
+Use `bun run test`, not a bare `bun test` from the repo root — the latter recursively finds test files across both workspaces but loads env relative to the root (where there's no `.env`), so `packages/api`'s DB-backed tests fail before Postgres/Redis even matter. See `packages/api/README.md`'s "Testing" section.
 
 Run for a single workspace with a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
 
@@ -49,7 +53,20 @@ bunx turbo dev --filter=client
 bunx turbo check-types --filter=api
 ```
 
-### Building the API's Docker image
+### Docker
+
+Two ways to run this in Docker, depending on what you need:
+
+**Full local stack** (`postgres` + `redis` + `api` + `worker` + `client`) via `docker-compose.yml` at the repo root:
+
+```sh
+cp .env.example .env   # fill BETTER_AUTH_SECRET (openssl rand -base64 48)
+docker compose up --build
+```
+
+Then open `http://localhost:3001`. Postgres/Redis are **not** published to the host by default (only reachable by other containers, via Compose's internal service-name DNS) — this avoids "port already in use" against a local Postgres/Redis you might already be running for `bun dev`. Add a `ports:` block back to either service in `docker-compose.yml` if you want host-side access (e.g. `psql -h localhost -p 5433`) for debugging the containerized DB specifically — use a non-5432/6379 host port to avoid exactly that collision. `apps/client`'s container runs with `network_mode: host` (Linux only) — see `docker-compose.yml`'s own comment for why (short version: `VITE_API_URL` is baked into the client bundle at build time and is used by both the browser and the container's own SSR fetches, which need different addressing on a normal bridge network — host networking sidesteps that for local testing). This is a pragmatic local-testing setup, not a production deployment topology.
+
+**Just the API image**, standalone (e.g. to push to a registry, or run against infra you already have):
 
 `packages/api`'s `Dockerfile` uses `turbo prune` to pull a consistent, workspace-aware
 dependency subset from the **root** `bun.lock` — so the build context must be the
@@ -58,6 +75,8 @@ repo root, not `packages/api/`:
 ```sh
 docker build -f packages/api/Dockerfile -t api .
 ```
+
+`apps/client/Dockerfile` follows the same `turbo prune` pattern (`docker build -f apps/client/Dockerfile -t client .`), but additionally runs `vite build` inside the image — see that Dockerfile's comments for the `VITE_API_URL` build-arg it needs and why.
 
 ## Useful Links
 

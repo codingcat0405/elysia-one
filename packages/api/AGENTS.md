@@ -13,7 +13,7 @@ Read `README.md` first for the architecture overview. This file is the "don't br
 - HTTP requests get their fork from `middlewares/setup.ts`'s `.derive()`.
 - BullMQ jobs get their fork inline in the module's `worker.ts` (one `orm.em.fork()` per job — see `modules/user/worker.ts`).
 
-If you're writing a query and typed `orm.em` instead of `em` (or a service built from it), stop — that's the bug this template was hardened against. `grep -rn "orm.em" src` matches `db.ts`, `setup.ts`, the `orm.em.fork()` line inside each module's `worker.ts`, and two `RequestContext.create(orm.em, ...)` call sites (`index.ts`'s `.mount()`, `macros/auth.ts`'s `checkAuth`) — both are the same fork-per-unit-of-work discipline applied to `better-auth-mikro-orm`, which does not fork the `EntityManager` on its own (see §11). Any other match is the bug.
+If you're writing a query and typed `orm.em` instead of `em` (or a service built from it), stop — that's the bug this template was hardened against. `grep -rn "orm.em" src` matches `db.ts`, `setup.ts`, the `orm.em.fork()` line inside each module's `worker.ts`, and two `RequestContext.create(orm.em, ...)` call sites (`index.ts`'s `.mount()`, `macros/auth.ts`'s `checkAuth`) — both are the same fork-per-unit-of-work discipline applied to `better-auth-mikro-orm`, which does not fork the `EntityManager` on its own (see §10). Any other match is the bug.
 
 ### 2. Services are per-unit-of-work, never singletons
 
@@ -36,7 +36,7 @@ Enqueue jobs only **after** the DB write that triggered them has committed (see 
 
 ### 5. Two Redis connections, never merge them
 
-- `utils/redis.ts` (`getRedis()`) — shared singleton for `RedisCacheAdapter` and `RedisLock`. Retry-limited (`maxRetriesPerRequest: 3`) so a command fails fast during an outage instead of hanging.
+- `utils/redis.ts` (`getRedis()`) — shared singleton for `RedisCacheAdapter`. Retry-limited (`maxRetriesPerRequest: 3`) so a command fails fast during an outage instead of hanging.
 - `utils/bull-connection.ts` — dedicated connection for BullMQ, **must** keep `maxRetriesPerRequest: null` (BullMQ requirement for its blocking commands; removing this breaks workers at startup).
 
 If you add another Redis-backed feature, decide explicitly which client it needs — don't default to reusing `bullConnection` for non-BullMQ work or vice versa.
@@ -55,25 +55,17 @@ Services and macros throw from `utils/http-errors.ts` (`BadRequestError`, `Unaut
 
 `index.ts` runs `orm.schema.updateSchema()` unconditionally on every boot, dev and prod. This is intentional for this project: change an entity, it syncs on next boot, no migration files. **Do not** add a `migrations` block to `mikro-orm.config.ts`, `migration:*` scripts, or migration files unless the user explicitly asks — `@mikro-orm/cli` being a devDependency is incidental, not a signal to build a migration workflow. Because there's no migration file to review before a schema diff applies, be extra careful with destructive entity changes (renaming/dropping a column/table) — the diff runs directly against whatever database is configured.
 
-### 9. No in-process clustering — scale via replicas, not `node:cluster`
-
-This template deliberately does **not** implement `node:cluster`/worker-thread scaling. Don't add it back without re-solving both reasons it was rejected:
-- Deployments run on Kubernetes (or similar); replica count already gives horizontal scaling at the infra layer — an in-process cluster duplicates that.
-- Bun's multi-instance-on-one-port mode doesn't reliably kill forked workers on dev-server stop/hot-reload, leaking background processes locally.
-
-`DB_POOL_MAX` is a **per-process** pool; total Postgres connections = `replica count × DB_POOL_MAX`. Check that against Postgres `max_connections` when changing pool defaults or replica count — this is a deployment-config concern, not something read from an env var in this codebase.
-
-### 10. Bull Board is Basic-Auth gated, not the Better Auth session — keep it that way
+### 9. Bull Board is Basic-Auth gated, not the Better Auth session — keep it that way
 
 `/bull-board` uses `utils/basic-auth.ts` (constant-time `timingSafeEqual` compare) deliberately, because it's a browser-native dashboard without access to the app's session cookie. `index.ts` fails boot fast if `ENABLE_BULL_BOARD=true` without credentials set — preserve that fail-fast check if you touch boot-time env validation.
 
-### 11. No application code reads or writes an auth cookie
+### 10. No application code reads or writes an auth cookie
 
 Better Auth's mounted handler (`auth.handler`, wired in `index.ts`'s `.mount()`) issues and clears the `better-auth.session_token` cookie entirely on its own. The only session *read* anywhere in this codebase is `auth.api.getSession({ headers })` inside `macros/auth.ts`, which hands Better Auth the real request headers and never touches `cookie` itself. If you find yourself reaching for Elysia's `cookie` context to set, read, or clear anything auth-related, stop — the design has been misunderstood; route it through `auth.ts` / the mounted handler instead.
 
 One narrow, necessary exception to the broader "never touch the global `EntityManager`" rule above: `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly and does not fork the `EntityManager` itself. Both the `.mount()` call in `index.ts` and `checkAuth`'s `auth.api.getSession()` call in `macros/auth.ts` wrap their Better Auth calls in MikroORM's `RequestContext.create(orm.em, () => ...)` to work around this — that AsyncLocalStorage-based fork is what invariant #1 is actually enforcing there, just via a different mechanism than `setup.ts`'s `em.fork()`. Don't remove it as if it were a stray `orm.em` violation.
 
-### 12. `export type App` (`index.ts`) is a public contract for `apps/client`
+### 11. `export type App` (`index.ts`) is a public contract for `apps/client`
 
 `apps/client` imports this type via `import type { App } from 'api'` and drives its Eden Treaty client off it (`apps/client/src/lib/eden-client.ts`) — that's the frontend's *only* type-safety net against the API's actual routes/schemas. Consequences:
 - Don't remove or rename the `App` export, and don't change `main`'s return shape in a way that breaks it.
@@ -91,8 +83,18 @@ Mirror `src/modules/profile/` — the reference module post-migration. It has no
 5. Mount the controller in `index.ts`'s `/api` group.
 6. Only if the feature needs background work: `modules/<name>/queue.ts` (one `Queue`, discriminated job union) + `modules/<name>/worker.ts` (processor, `switch (job.name)`), then register the `Worker` in `src/worker.ts` — see `modules/user/queue.ts` + `worker.ts`, which stayed in place across the auth migration purely for their BullMQ job (`send-welcome-email`), not for any HTTP routes.
 
+## Testing
+
+`bun test`, co-located `*.test.ts` next to the source they cover. Two layers — see `README.md`'s "Testing" section for the full explanation:
+- Pure unit tests (`utils/*.test.ts`, `middlewares/errorMiddleware.test.ts`) — no external services.
+- Route-level tests (`modules/profile/profile.test.ts`) — `app.handle(new Request(...))` against **real** Postgres + Redis, no mocks. `main` is `export`ed from `index.ts` specifically so tests can call it and get a live `Elysia` instance; its bottom-of-file self-invocation is guarded by `if (require.main === module)` so importing it for a test never double-boots the real server. `beforeEach` truncates the auth tables — write new route tests the same way, don't leave rows behind for the next test/run.
+
+There is still no CI (`.github/workflows` doesn't exist) — these tests only run when someone runs them locally. If you wire up CI, don't silently skip these; either run them for real (needs a Postgres+Redis service in the CI job) or say explicitly they're excluded and why.
+
+Run via `bun run test` (root or here), not a bare `bun test` from the repo root — the latter loads env relative to the root CWD, where there's no `.env` (only `packages/api/.env`), so the route-level tests fail immediately on the boot-time env check, before Postgres/Redis reachability is even relevant.
+
 ## Before you finish
 
 - Run `bun run check-types` (`bunx tsc --noEmit`) — this template has caught real bugs (missing `.js` extensions on dynamic `import()` under `NodeNext`, missing `.use(setup)` in a controller) exactly this way.
-- There is no test suite yet (`bun test` is a placeholder). If you add one, don't silently skip it in CI — either wire it in for real or say explicitly that it doesn't exist.
+- Run `bun test` (needs Postgres + Redis reachable — see "Testing" above) if you touched anything under `modules/profile/`, `macros/auth.ts`, `auth.ts`, or `middlewares/`.
 - Don't add a new `.env` var without adding it to `.env.example` with a comment on when it's required.

@@ -7,8 +7,8 @@ export default defineConfig({
   clientUrl: process.env.DATABASE_URL,
   entities: ['src/entities'],
   pool: {
-    // NOTE: in cluster mode total connections = workers * max.
-    // Keep workers * max < postgres max_connections (default 100) with headroom.
+    // NOTE: this is a per-process pool — total connections = replica count * max.
+    // Keep that under postgres max_connections (default 100) with headroom.
     min: Number(process.env.DB_POOL_MIN ?? 0),
     max: Number(process.env.DB_POOL_MAX ?? 10),
     // fail fast instead of default 60s hang when the pool is exhausted

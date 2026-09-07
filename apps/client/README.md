@@ -29,6 +29,8 @@ bun run build
 bun run preview
 ```
 
+Docker: `Dockerfile` (build from the repo root: `docker build -f apps/client/Dockerfile -t client .`) — runs `vite build`'s SSR output (`dist/server/server.js`), not `preview`. See the root [`README.md`](../../README.md#docker) for the full local stack via `docker-compose.yml`, including why the client container needs `network_mode: host`.
+
 ## Auth
 
 - Better Auth issues an httpOnly `better-auth.session_token` cookie on sign-in/sign-up (username/password or Google). It's never readable from JavaScript — auth state is derived by calling `getSessionUser()` in `src/lib/auth-client.ts`, which wraps Better Auth's own `authClient.getSession()`.

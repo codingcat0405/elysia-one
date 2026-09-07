@@ -1,8 +1,6 @@
-# Elysia Forge - Elysia + MikroORM + BullMQ template
+# Elysia One — API
 
-Production-hardened Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), [Better Auth](https://better-auth.com) (username/password + Google OAuth, httpOnly session cookie) on a `better-auth-mikro-orm` adapter over the same MikroORM pool. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
-
-Horizontal scaling is handled by the deployment platform (multiple stateless replicas, e.g. Kubernetes), not by in-process clustering — this template deliberately does not implement `node:cluster`/worker-thread scaling. See "Pool sizing" below.
+Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), [Better Auth](https://better-auth.com) (username/password + Google OAuth, httpOnly session cookie) on a `better-auth-mikro-orm` adapter over the same MikroORM pool. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
 
 ## Quick start
 
@@ -14,16 +12,19 @@ bun dev                 # watch mode; schema auto-sync on boot (see "Schema" bel
 
 Google sign-in is optional — see `.env.example`'s `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` comments for the Google Cloud Console step. Skip it to run with username/password only; the API boots fine with neither var set.
 
-- Swagger UI: `http://localhost:3000/swagger-ui` (auto-enabled outside production; opt in for prod with `ENABLE_SWAGGER=true`)
+- Swagger UI: `http://localhost:3000/swagger-ui` — requires the explicit opt-in `ENABLE_SWAGGER=true`, in dev or prod (there is no `NODE_ENV`-based auto-enable)
 - Bull Board (job dashboard): `http://localhost:3000/bull-board`, opt in with `ENABLE_BULL_BOARD=true` + `BULL_BOARD_USER`/`BULL_BOARD_PASSWORD` (HTTP Basic Auth, not JWT)
 - Background worker (BullMQ), separate process: `bun worker:dev`
 
-Docker:
+Docker: the `Dockerfile` uses `turbo prune`, which needs the **repo root** as build context, not this directory — see the root [`README.md`](../../README.md#docker):
 
 ```bash
-docker build -t elysia-template .
-docker run -p 3000:3000 --env-file .env -e NODE_ENV=production elysia-template
+# from the repo root, not packages/api/
+docker build -f packages/api/Dockerfile -t api .
+docker run -p 3000:3000 --env-file .env -e NODE_ENV=production api
 ```
+
+For the full stack (this API + worker + Postgres + Redis + the client) in one command, use `docker compose up --build` at the repo root instead — see the root README's "Docker" section.
 
 **Full rules for anyone (human or AI agent) extending this template: see [`AGENTS.md`](./AGENTS.md).**
 
@@ -66,10 +67,11 @@ src/
   utils/
     http-errors.ts             # framework-free HttpError classes
     logger.ts                  # winston: pretty dev / JSON prod
-    redis.ts                   # shared ioredis client (cache adapter, lock)
+    redis.ts                   # shared ioredis client (cache adapter)
+    client-origins.ts          # shared CLIENT_URL parse (CORS + Better Auth trustedOrigins)
     bull-connection.ts        # DEDICATED ioredis connection for BullMQ
-    RedisCacheAdapter.ts       # MikroORM result-cache adapter (Redis-backed)
-    RedisLock.ts               # SET NX PX + Lua-script distributed lock
+    RedisCacheAdapter.ts       # MikroORM result-cache adapter (Redis-backed); wired in as
+                               # the default adapter, but no query opts in with `cache:` yet
     basic-auth.ts              # HTTP Basic Auth guard (Bull Board), timing-safe compare
 ```
 
@@ -82,22 +84,13 @@ src/
 
 ### Schema: auto-sync, no migrations (intentional)
 
-`index.ts` runs `orm.schema.updateSchema()` unconditionally on every boot — dev **and** prod, single **and** cluster mode (once, in the primary, before forking workers). This is deliberate for this project: schema changes ship by changing entities, not by writing/running migration files. There is no `migrations` block in `mikro-orm.config.ts` and no `migration:*` scripts in `package.json` — don't add them unless explicitly asked; `@mikro-orm/cli` being present is incidental (transitive dep), not a signal to wire up migrations.
+`index.ts` runs `orm.schema.updateSchema()` unconditionally on every boot — dev **and** prod. This is deliberate for this project: schema changes ship by changing entities, not by writing/running migration files. There is no `migrations` block in `mikro-orm.config.ts` and no `migration:*` scripts in `package.json` — don't add them unless explicitly asked. `@mikro-orm/cli` **is** an explicit `devDependency` (not a transitive one) — it's kept available for ad-hoc schema inspection/debugging via its CLI, not as a signal to wire up a migrations workflow.
 
 If you change an entity, `updateSchema()` picks it up on next boot — no extra step needed. Keep this in mind for destructive changes (renaming/dropping a column): auto-sync applies the diff directly, there's no migration file to review before it runs against a real database.
 
 ### Pool sizing
 
-Per-process pool via `DB_POOL_MAX` (default 10). Each running instance of the API (each k8s pod replica, each `bun start` process) owns its own pool: `total connections = replicas × DB_POOL_MAX` — keep that under Postgres `max_connections` with headroom, or put pgBouncer in front. This template has no in-process horizontal scaling (see next section); replica count is a deployment-time concern, not something set via an env var here.
-
-### Why no `node:cluster` / worker-threads scaling
-
-Considered and deliberately rejected for this template:
-
-1. Deployments run on Kubernetes (or similar), which already handles horizontal scaling via replica count — an in-process cluster would just duplicate that at a different layer.
-2. Bun's multi-instance-on-one-port mode doesn't reliably tear down forked workers on dev-server stop/hot-reload, leaking background processes during local development.
-
-If you truly need in-process multi-core usage outside k8s, evaluate it as a deliberate, separate change — don't casually re-add a `WORKER_THREADS` env var without re-solving both problems above.
+Per-process pool via `DB_POOL_MAX` (default 10). Each running instance of the API (each k8s pod replica, each `bun start` process) owns its own pool: `total connections = replicas × DB_POOL_MAX` — keep that under Postgres `max_connections` with headroom, or put pgBouncer in front.
 
 ### Eden Treaty type export (end-to-end type safety)
 
@@ -107,6 +100,8 @@ This only works if `packages/api`'s declaration output is built: `bun run build`
 
 - After cloning, run `bun run build` in `packages/api` (or `bunx turbo build --filter=api`) once before relying on `apps/client`'s eden types.
 - Whenever you add/rename a route, or change a `model.ts` body/response schema, rebuild `packages/api` so `apps/client`'s types stay in sync — otherwise the client either type-checks against a stale contract or silently keeps working with outdated IDE hints until the next build.
+
+`main` is also `export`ed as a value (not just its return type), specifically so route-level tests can `import { main } from '../../index'`, call it, and get a fully-composed `Elysia` instance to drive with `app.handle()` (see "Testing" below) — without accidentally double-booting the real server. `index.ts`'s bottom-of-file self-invocation is guarded by `if (require.main === module)`, which is only true when this file is the actual process entry point (`bun run src/index.ts`), never when a test file imports it.
 
 ### Background jobs (BullMQ)
 
@@ -123,7 +118,7 @@ Mounted at `/bull-board`, gated by HTTP Basic Auth (`utils/basic-auth.ts`, const
 
 | Client | File | Used by | Notes |
 |---|---|---|---|
-| Shared client | `utils/redis.ts` (`getRedis()`) | `RedisCacheAdapter`, `RedisLock` | Singleton, retry-limited, safe for normal commands |
+| Shared client | `utils/redis.ts` (`getRedis()`) | `RedisCacheAdapter` | Singleton, retry-limited, safe for normal commands |
 | Dedicated client | `utils/bull-connection.ts` | BullMQ `Queue`/`Worker` | `maxRetriesPerRequest: null`, required for blocking ops |
 
 `mikro-orm.config.ts` still falls back to `MemoryCacheAdapter` (per-process, not shared) when `REDIS_URL` is unset, but `index.ts`'s boot-time required-env check means normal `bun dev`/`bun start` never reaches that path — `REDIS_URL` is mandatory. The fallback only matters for code paths that import `db.ts` without going through `index.ts`'s checks (e.g. a future test harness).
@@ -151,7 +146,7 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 | `DB_POOL_MIN` / `DB_POOL_MAX` | no | `0` / `10` | Per-process pool; multiply by replica count when sizing Postgres `max_connections` |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS` | no | `10000` | Fail fast instead of hanging |
 | `DB_POOL_IDLE_TIMEOUT_MS` | no | `30000` | Keep under infra idle timeouts |
-| `ENABLE_SWAGGER` | no | auto outside prod | Set `true` to force-enable in prod |
+| `ENABLE_SWAGGER` | no | disabled | No `NODE_ENV`-based auto-enable — set `true` explicitly to turn on Swagger UI, in dev or prod |
 | `REDIS_URL` | **yes** | — | Boot fails fast if missing (also required for the worker, `bun worker`) |
 | `WORKER_CONCURRENCY` | no | `5` | Jobs processed in parallel, per worker process |
 | `ENABLE_BULL_BOARD` | no | `false` | If `true`, `BULL_BOARD_USER`/`PASSWORD` become required |
@@ -173,9 +168,24 @@ The httpOnly session cookie imposes a few deployment constraints:
 
 There is no `COOKIE_DOMAIN`-equivalent var wired up — this template assumes client and API share an exact origin/registrable domain per environment. A genuinely split-subdomain deployment (client on `app.example.com`, API on `api.example.com`) would need `advanced.crossSubDomainCookies` configured in `src/auth.ts`; not done here, deliberately (see "Known gaps").
 
+## Testing
+
+`bun test` (Bun's built-in, Jest-compatible runner — no extra dependency). Two layers, both co-located next to the source they cover as `*.test.ts`:
+
+- **Pure unit tests** (`utils/*.test.ts`, `middlewares/errorMiddleware.test.ts`) — no external services, plain function calls with hand-built mock objects.
+- **Route-level tests** (`modules/profile/profile.test.ts`) — Elysia's own unit-test pattern (`app.handle(new Request(...))`, see [elysiajs.com/patterns/unit-test](https://elysiajs.com/patterns/unit-test)) driven against this project's **real** Postgres + Redis, same as `bun dev`. There is no mocked/in-memory mode — requires `.env` filled in and both reachable. `beforeEach` truncates the auth tables so each test starts clean; the API itself is built once via `main()` in a `beforeAll` (imported from `index.ts`, which exports `main` specifically for this — importing it never double-boots the real app, see `index.ts`'s `require.main === module` guard).
+
+### Running tests — do this from the right place
+
+- **`bun run test` (repo root or here) is the supported entry point.** At the root it runs via Turborepo, which invokes each workspace's own `test` script *inside that workspace's directory* — `packages/api`'s tests run with `packages/api` as the working directory, so its `.env` resolves normally.
+- **Do NOT run a bare `bun test` from the repo root.** Bun's test runner recursively finds every `*.test.ts` file under the current directory regardless of workspace boundaries, so it picks up `apps/client`'s tests too — but it loads env files relative to *that* CWD (the repo root), where there is no `.env` (only `packages/api/.env` exists, one level down). The DB-backed tests fail immediately with `Missing required env var: BETTER_AUTH_SECRET`, before Postgres/Redis reachability even comes into play. Either `cd packages/api && bun test`, or use `bun run test`.
+- **Bun's own env precedence for `bun test`** also loads `.env.test` / `.env.test.local` on top of `.env`/`.env.local`, if present (`.env.test` wins on overlapping keys) — a Bun convention, not something this repo currently uses (there's exactly one Postgres/Redis config, reused for `bun dev` and `bun test` alike, truncated between tests rather than isolated in a second database). If you ever want test-specific overrides (e.g. a dedicated test database), add `packages/api/.env.test` — Bun picks it up automatically, no wiring needed.
+
+CI is not set up (see gaps below), so these currently only run when someone runs them locally.
+
 ## Known gaps (don't assume these are solved)
 
-- No test suite (`bun test` script is a placeholder that exits 1).
+- No CI (`.github/workflows` doesn't exist) — tests exist (see "Testing" above) but nothing runs them automatically.
 - No lint script/config in `package.json`.
 - No rate limiting on `/api/auth/*` (sign-in/sign-up/etc. are unthrottled).
 - No email verification (`user.emailVerified` is always `false`) and no password reset flow — the `verification` table exists (Better Auth core schema) but nothing writes to it; wiring either up means adding a mailer.

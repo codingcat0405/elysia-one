@@ -31,10 +31,6 @@ Non-negotiable consequences:
 - **`SameSite=Lax` is required, not `Strict`** — the Google OAuth redirect back from `accounts.google.com` is a top-level cross-site navigation, which `SameSite=Strict` cookies do not survive. CSRF defence is therefore Lax's own same-site-for-unsafe-methods behaviour plus Better Auth's `trustedOrigins` check (an explicit Origin/Referer allowlist on state-changing requests) — so `CLIENT_URL` (which feeds `trustedOrigins`) must be the exact production origin, not a wildcard.
 - Don't introduce a second auth mechanism (e.g. a JWT bearer header alongside the session cookie, or a hand-rolled OAuth flow) without updating both packages deliberately — they are not designed to coexist.
 
-## No in-process horizontal scaling — that's the deployment platform's job
-
-`packages/api` does **not** implement `node:cluster`/worker-thread scaling. This was considered and rejected: deployments target Kubernetes (or similar), where replica count already provides horizontal scaling, and Bun's multi-instance-per-port mode doesn't reliably kill forked workers on local dev-server stop/hot-reload. Don't reintroduce in-process clustering (e.g. a `WORKER_THREADS` env var) without re-solving both problems — see `packages/api/README.md` → "Why no `node:cluster` / worker-threads scaling".
-
 ## Commands
 
 ```sh
