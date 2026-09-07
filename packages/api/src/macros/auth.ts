@@ -43,9 +43,18 @@ const authMacro = new Elysia({ name: 'macro.auth' }).macro({
           user: {
             id: session.user.id,
             // Google sign-ins never collect a username (see auth.ts's
-            // databaseHooks); fall back to email so callers always get a
-            // non-empty display string.
-            username: session.user.username ?? session.user.email,
+            // databaseHooks); fall back to `name`, matching
+            // apps/client/src/lib/auth-client.ts's `getSessionUser()`
+            // fallback exactly. Falling back to `email` here (as an earlier
+            // version did) would (a) disagree with the client's fallback,
+            // showing a different "username" depending on which code path
+            // rendered it, and (b) expose the user's email address in a
+            // field labeled "username" wherever this response is displayed
+            // or logged. `name` is `NOT NULL` on `AuthUser` and always
+            // populated (register.tsx sends `name: username`; Google's
+            // profile mapping always supplies `name`), so this never falls
+            // through to `undefined`.
+            username: session.user.username ?? session.user.name,
             role,
           },
         }

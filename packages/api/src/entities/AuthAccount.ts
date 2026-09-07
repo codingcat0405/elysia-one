@@ -1,6 +1,15 @@
-import { Entity, Property } from '@mikro-orm/core'
+import { Entity, Index, Property } from '@mikro-orm/core'
 import { AuthBaseEntity } from './AuthBaseEntity'
 
+// SECURITY: this entity holds the scrypt credential hash and OAuth bearer
+// tokens (below). It intentionally has NO `hidden: true` on those fields —
+// see the comment on `password` for why — so the ONLY thing preventing them
+// from leaking over HTTP is that no route anywhere returns an `AuthAccount`
+// entity (`modules/profile` builds a plain `{ id, username, role }` object
+// instead). If you add a route, an admin user-list, a debug endpoint, or an
+// ORM `populate` that puts an `AuthAccount` (or one of its sensitive fields)
+// into a response, you have reopened this hole. Grep for `AuthAccount` before
+// trusting any new response shape.
 @Entity({ tableName: 'account' })
 export class AuthAccount extends AuthBaseEntity {
   @Property()
@@ -10,6 +19,9 @@ export class AuthAccount extends AuthBaseEntity {
   providerId!: string
 
   // Plain scalar (see AuthSession.userId comment) — no `@ManyToOne` relation.
+  // Indexed: Better Auth looks up a user's linked accounts (credential +
+  // OAuth) by this column on sign-in, account-linking, and session checks.
+  @Index()
   @Property()
   userId!: string
 

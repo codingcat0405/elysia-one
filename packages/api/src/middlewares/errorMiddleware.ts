@@ -1,4 +1,5 @@
 import { HttpError } from '../utils/http-errors'
+import logger from '../utils/logger'
 
 // https://elysiajs.com/patterns/error-handling.html
 const errorMiddleware = ({ code, error, set }: any) => {
@@ -10,11 +11,20 @@ const errorMiddleware = ({ code, error, set }: any) => {
 
   if (code === 'VALIDATION') {
     set.status = 400
-    const validationError = JSON.parse(error.message)
-    return { 
+    // Elysia's VALIDATION error.message is normally JSON, but that's a
+    // convention, not a guarantee — a malformed/unexpected message must not
+    // throw *inside* this already-in-the-error-handler path, which would
+    // otherwise replace a clean 400 with an unhandled-exception 500.
+    let validationError: { summary?: string; errors?: unknown[] } | null = null
+    try {
+      validationError = JSON.parse(error.message)
+    } catch {
+      logger.error('VALIDATION error.message was not valid JSON', { raw: error.message })
+    }
+    return {
       message: validationError?.summary ?? 'Validation error',
       errors: validationError?.errors ?? [],
-      status: 400 
+      status: 400
     }
   }
 
@@ -25,7 +35,7 @@ const errorMiddleware = ({ code, error, set }: any) => {
 
   // everything else is a real bug: log details server-side, return a generic
   // message so DB/driver/internal errors never leak to clients
-  console.error(error)
+  logger.error(error)
   set.status = 500
   return { message: 'Internal server error', status: 500 }
 }

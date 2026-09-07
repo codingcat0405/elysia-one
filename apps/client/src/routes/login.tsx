@@ -29,11 +29,16 @@ function LoginPage() {
     await navigate({ to: '/' })
   }
 
-  const handleGoogle = () => {
-    void authClient.signIn.social({
+  const handleGoogle = async () => {
+    // On success this redirects the browser away before returning. On
+    // failure (e.g. Google not configured on this deployment) it resolves
+    // with `{ error }` rather than throwing — same convention as
+    // signIn.username/signIn.email — so AuthForm's catch needs a real throw.
+    const { error } = await authClient.signIn.social({
       provider: 'google',
       callbackURL: `${window.location.origin}/`,
     })
+    if (error) throw error
   }
 
   return (

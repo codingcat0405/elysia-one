@@ -5,10 +5,11 @@ import type { MikroORM } from '@mikro-orm/postgresql'
 import { initORM } from './db'
 import { userQueue } from './modules/user/queue'
 import logger from './utils/logger'
+import { getClientOrigins } from './utils/client-origins'
 
 // Shape actually observed from the installed better-auth@1.7.3 at runtime
-// (see packages/api/scripts/spike-better-auth.ts) — kept minimal on purpose,
-// see the `Auth` type comment below for why this can't just be
+// (verified empirically during the Phase 01 adapter spike) — kept minimal on
+// purpose, see the `Auth` type comment below for why this can't just be
 // `ReturnType<typeof createAuth>`.
 interface AuthUserShape {
   id: string
@@ -51,13 +52,10 @@ interface AuthApi {
   }): Promise<{ session: AuthSessionShape; user: AuthUserShape } | null>
 }
 
-// Same origin-list parse as index.ts's CORS config (must agree with it: this
-// feeds Better Auth's own Origin/Referer check on state-changing requests,
-// the second half of the Lax-cookie CSRF defence now that SameSite=Strict is
-// gone — see plan.md D5/B4).
-const clientOrigins = (process.env.CLIENT_URL ?? 'http://localhost:3001')
-  .split(',')
-  .map((s) => s.trim())
+// Shared with index.ts's CORS config (must agree with it: this feeds Better
+// Auth's own Origin/Referer check on state-changing requests, the second
+// half of the Lax-cookie CSRF defence now that SameSite=Strict is gone).
+const clientOrigins = getClientOrigins()
 
 // Google is opt-in: registered only when BOTH vars are present. index.ts's
 // boot check fails fast on exactly one being set; this is just the
@@ -178,8 +176,17 @@ const createAuth = (orm: MikroORM) =>
 // a property of the auth instance itself, not of `auth.api`.
 export type Auth = { api: AuthApi; handler: (request: Request) => Promise<Response> }
 
-let instance: Auth | null = null
+let instance: Promise<Auth> | null = null
 
-// Cached initializer: safe to call multiple times, initializes once.
-export const initAuth = async (): Promise<Auth> =>
-  (instance ??= createAuth((await initORM()).orm) as unknown as Auth)
+// Cached initializer: safe to call multiple times, initializes once. Caches
+// the in-flight PROMISE, not the resolved value — the previous version
+// awaited `initORM()` before the `??=` assignment ran, so two concurrent
+// first callers could both see `instance` as unset and each build (and
+// discard) their own betterAuth() instance. Assigning the promise
+// synchronously, before any internal `await` runs, closes that window: the
+// second caller's `??=` check now always sees the first caller's in-flight
+// promise and awaits the same one. Not reachable today (main() awaits this
+// once, serially, before .listen()) — fixed anyway since it's a one-line
+// change and a latent footgun for any future concurrent boot-time caller.
+export const initAuth = (): Promise<Auth> =>
+  (instance ??= (async () => createAuth((await initORM()).orm) as unknown as Auth)())

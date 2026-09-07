@@ -3,6 +3,7 @@ import { RequestContext } from "@mikro-orm/postgresql";
 import { initORM } from "./db";
 import { initAuth } from "./auth";
 import logger from "./utils/logger";
+import { getClientOrigins } from "./utils/client-origins";
 import cors from "@elysiajs/cors";
 import { setup } from "./middlewares/setup";
 import responseMiddleware from "./middlewares/responseMiddleware";
@@ -32,7 +33,10 @@ if (process.env.ENABLE_BULL_BOARD === "true") {
   }
 }
 
-const main = async () => {
+// Exported (not just its return type) so tests can call it directly and get
+// a fully-composed Elysia instance to drive with `app.handle()` — see
+// Elysia's own unit-test docs (https://elysiajs.com/patterns/unit-test).
+export const main = async () => {
   const { orm } = await initORM();
   await orm.schema.updateSchema();
   const auth = await initAuth();
@@ -45,9 +49,7 @@ const main = async () => {
 
   // A wildcard/reflected origin makes the browser discard the auth cookies when
   // credentials:true — origin must be an explicit list, never `true`/`*`.
-  const clientOrigins = (process.env.CLIENT_URL ?? "http://localhost:3001")
-    .split(",")
-    .map((s) => s.trim());
+  const clientOrigins = getClientOrigins();
 
   const app = new Elysia()
     .use(cors({ origin: clientOrigins, credentials: true }))
@@ -116,8 +118,11 @@ const main = async () => {
     console.log(`📚 Swagger:    http://localhost:${port}/swagger-ui`);
   }
   if (process.env.ENABLE_BULL_BOARD === "true") {
+    // Never print BULL_BOARD_PASSWORD — this line ends up in stdout, which
+    // routinely flows into a log aggregator. Print the username only, as a
+    // reminder that Basic Auth is on, not a credential.
     console.log(
-      `📊 Bull Board: http://localhost:${port}/bull-board (${process.env.BULL_BOARD_USER}:${process.env.BULL_BOARD_PASSWORD})`,
+      `📊 Bull Board: http://localhost:${port}/bull-board (user: ${process.env.BULL_BOARD_USER})`,
     );
   }
   const shutdown = async (signal: string) => {
@@ -132,9 +137,23 @@ const main = async () => {
   return app;
 };
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// `require.main === module` is true only when this file is the process
+// entry point (`bun run src/index.ts`) — false when a test file `import`s
+// `main` from here, so importing this module for testing never double-boots
+// the app (second `.listen()` on the same port, duplicate schema sync,
+// etc). Bun supports both `require.main`/`module` (CJS-style, used here)
+// and `import.meta.main` (ESM-style) at runtime regardless of a file's
+// static module classification — `import.meta.main` was tried first but
+// rejected by `tsc` (TS1470) since this package has no `"type": "module"`
+// in package.json, so NodeNext module resolution type-checks this file as
+// CommonJS; adding `"type": "module"` would in turn require explicit `.js`
+// extensions on every relative import repo-wide (NodeNext ESM rule) — out
+// of scope for this change.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
 //eden treaty export type for FE apps
 export type App = Awaited<ReturnType<typeof main>>;

@@ -10,7 +10,7 @@
     "worker": "bun run src/worker.ts",
     "build": "tsc",
     "check-types": "bunx tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "bun test"
   },
   "dependencies": {
     "@bull-board/api": "^8.3.0",

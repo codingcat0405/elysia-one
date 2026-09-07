@@ -25,9 +25,10 @@ type AuthFormProps = {
   emailField?: boolean
   /** Defaults to "Username". */
   usernameLabel?: string
-  /** Redirects the browser away — see the call site comment for why this
-   * isn't wired through the form's own submit/loading state. */
-  onGoogle?: () => void
+  /** On success, redirects the browser away — nothing further happens here.
+   * On failure (e.g. Google not configured on this deployment), rejects;
+   * AuthForm catches it and renders the same inline error as onSubmit. */
+  onGoogle?: () => Promise<void>
 }
 
 // Shared login / register form. Both screens differ only in copy + submit handler.
@@ -50,6 +51,10 @@ export function AuthForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const toErrorMessage = (err: unknown) =>
+    (err as { message?: string } | null)?.message ??
+    'Something went wrong. Please try again.'
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -57,12 +62,21 @@ export function AuthForm({
     try {
       await onSubmit(credentials)
     } catch (err) {
-      setError(
-        (err as { message?: string } | null)?.message ??
-          'Something went wrong. Please try again.',
-      )
+      setError(toErrorMessage(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleClick = async () => {
+    setError(null)
+    try {
+      await onGoogle?.()
+    } catch (err) {
+      // Reachable when Google isn't configured on this deployment (the
+      // documented default) or the request fails outright — on success the
+      // browser navigates away before this ever runs.
+      setError(toErrorMessage(err))
     }
   }
 
@@ -135,7 +149,7 @@ export function AuthForm({
                 type="button"
                 variant="outline"
                 className="w-full"
-                onClick={onGoogle}
+                onClick={handleGoogleClick}
               >
                 Continue with Google
               </Button>

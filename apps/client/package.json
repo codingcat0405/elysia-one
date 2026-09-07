@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "lint": "eslint",
     "check-types": "tsc --noEmit",
+    "test": "bun test",
     "format": "prettier --write . && eslint --fix",
     "check": "prettier --check ."
   },
@@ -45,15 +46,10 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "bun-types": "^1.2.0",
     "eslint": "^9.20.0",
     "prettier": "^3.8.1",
     "typescript": "^6.0.2",
     "vite": "^8.0.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ]
   }
 }
