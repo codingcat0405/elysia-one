@@ -9,23 +9,15 @@ import { ProfileModel } from './model'
 const profileController = new Elysia({ prefix: '/profile' })
   .use(setup)
   .use(authMacro)
-  .get(
-    '/me',
-    ({ user }) => user,
-    {
-      checkAuth: ['user', 'admin'],
-      response: { 200: ProfileModel.sessionUser },
-      detail: { tags: ['Profile'], security: [{ SessionCookie: [] }] },
-    },
-  )
-  .get(
-    '/admin',
-    ({ user }) => user,
-    {
-      checkAuth: ['admin'],
-      response: { 200: ProfileModel.sessionUser },
-      detail: { tags: ['Profile'], security: [{ SessionCookie: [] }] },
-    },
-  )
+  .get('/me', ({ user }) => user, {
+    checkAuth: ['user', 'admin'],
+    response: { 200: ProfileModel.sessionUser },
+    detail: { tags: ['Profile'], security: [{ SessionCookie: [] }] },
+  })
+  .get('/admin', ({ user }) => user, {
+    checkAuth: ['admin'],
+    response: { 200: ProfileModel.sessionUser },
+    detail: { tags: ['Profile'], security: [{ SessionCookie: [] }] },
+  })
 
 export default profileController

@@ -1,11 +1,11 @@
-import { Redis } from "ioredis";
-import logger from "./logger";
+import { Redis } from 'ioredis'
+import logger from './logger'
 
-let redisClient: Redis | null = null;
+let redisClient: Redis | null = null
 
 export async function getRedis(): Promise<Redis> {
   if (redisClient) {
-    return redisClient;
+    return redisClient
   }
   redisClient = new Redis(process.env.REDIS_URL!, {
     // exponential-ish backoff capped at 5s; must always return a number —
@@ -17,14 +17,14 @@ export async function getRedis(): Promise<Redis> {
     // detect dead sockets behind NAT/LB idle timeouts (default is effectively off)
     keepAlive: 30_000,
     connectTimeout: 10_000,
-  });
+  })
 
   // attach BEFORE any command: an unhandled 'error' event crashes the process
-  redisClient.on("error", (err) => logger.error("Redis error", err));
-  redisClient.on("ready", () => logger.info("Redis connected"));
-  redisClient.on("reconnecting", (delay: number) =>
-    logger.warn("Redis reconnecting", { delay }),
-  );
+  redisClient.on('error', (err) => logger.error('Redis error', err))
+  redisClient.on('ready', () => logger.info('Redis connected'))
+  redisClient.on('reconnecting', (delay: number) =>
+    logger.warn('Redis reconnecting', { delay }),
+  )
 
-  return redisClient;
+  return redisClient
 }

@@ -1,6 +1,5 @@
 import { Queue } from 'bullmq'
-import { bullConnection } from '../../utils/bull-connection';
-
+import { bullConnection } from '../../utils/bull-connection'
 
 // job data becomes a union, discriminated by job.name:
 // userId is a Better Auth UUID string (was a numeric PK pre-migration).

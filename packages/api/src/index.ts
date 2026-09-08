@@ -1,35 +1,38 @@
-import process from "node:process";
-import { RequestContext } from "@mikro-orm/postgresql";
-import { initORM } from "./db";
-import { initAuth } from "./auth";
-import logger from "./utils/logger";
-import { getClientOrigins } from "./utils/client-origins";
-import cors from "@elysiajs/cors";
-import { setup } from "./middlewares/setup";
-import responseMiddleware from "./middlewares/responseMiddleware";
-import errorMiddleware from "./middlewares/errorMiddleware";
-import profileController from "./modules/profile";
-import Elysia from "elysia";
-import swagger from "@elysiajs/swagger";
+import process from 'node:process'
+import { RequestContext } from '@mikro-orm/postgresql'
+import { initORM } from './db'
+import { initAuth } from './auth'
+import logger from './utils/logger'
+import { getClientOrigins } from './utils/client-origins'
+import cors from '@elysiajs/cors'
+import { setup } from './middlewares/setup'
+import responseMiddleware from './middlewares/responseMiddleware'
+import errorMiddleware from './middlewares/errorMiddleware'
+import profileController from './modules/profile'
+import Elysia from 'elysia'
+import swagger from '@elysiajs/swagger'
 
-for (const key of ["BETTER_AUTH_SECRET", "DATABASE_URL", "REDIS_URL"]) {
+for (const key of ['BETTER_AUTH_SECRET', 'DATABASE_URL', 'REDIS_URL']) {
   if (!process.env[key]) {
-    throw new Error(`Missing required env var: ${key}`);
+    throw new Error(`Missing required env var: ${key}`)
   }
 }
 // Google sign-in is opt-in and must stay fully optional (no Google Cloud
 // Console credentials required to boot this template) — but exactly one var
 // set is unambiguously a misconfiguration, not a valid "disabled" state.
-if (Boolean(process.env.GOOGLE_CLIENT_ID) !== Boolean(process.env.GOOGLE_CLIENT_SECRET)) {
+if (
+  Boolean(process.env.GOOGLE_CLIENT_ID) !==
+  Boolean(process.env.GOOGLE_CLIENT_SECRET)
+) {
   throw new Error(
-    "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in, or both left unset to disable it",
-  );
+    'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in, or both left unset to disable it',
+  )
 }
-if (process.env.ENABLE_BULL_BOARD === "true") {
+if (process.env.ENABLE_BULL_BOARD === 'true') {
   if (!process.env.BULL_BOARD_USER || !process.env.BULL_BOARD_PASSWORD) {
     throw new Error(
-      "Missing required env var: BULL_BOARD_USER or BULL_BOARD_PASSWORD",
-    );
+      'Missing required env var: BULL_BOARD_USER or BULL_BOARD_PASSWORD',
+    )
   }
 }
 
@@ -37,19 +40,19 @@ if (process.env.ENABLE_BULL_BOARD === "true") {
 // a fully-composed Elysia instance to drive with `app.handle()` — see
 // Elysia's own unit-test docs (https://elysiajs.com/patterns/unit-test).
 export const main = async () => {
-  const { orm } = await initORM();
-  await orm.schema.updateSchema();
-  const auth = await initAuth();
+  const { orm } = await initORM()
+  await orm.schema.updateSchema()
+  const auth = await initAuth()
   // load lazily: @bull-board/elysia sync-requires elysia internally, which under
   // Bun must not run before elysia has been ES-imported (memoirist is async)
   const bullBoardPlugin =
-    process.env.ENABLE_BULL_BOARD === "true"
-      ? await (await import("./bull-board.js")).createBullBoardPlugin()
-      : null;
+    process.env.ENABLE_BULL_BOARD === 'true'
+      ? await (await import('./bull-board.js')).createBullBoardPlugin()
+      : null
 
   // A wildcard/reflected origin makes the browser discard the auth cookies when
   // credentials:true — origin must be an explicit list, never `true`/`*`.
-  const clientOrigins = getClientOrigins();
+  const clientOrigins = getClientOrigins()
 
   const app = new Elysia()
     .use(cors({ origin: clientOrigins, credentials: true }))
@@ -64,45 +67,47 @@ export const main = async () => {
     // Placed BEFORE `.use(setup)` so this mount never pays for a
     // `setup`-derived `em.fork()` it never uses (setup.ts's fork is a
     // separate, independent context and is unaffected).
-    .mount((request) => RequestContext.create(orm.em, () => auth.handler(request)))
+    .mount((request) =>
+      RequestContext.create(orm.em, () => auth.handler(request)),
+    )
     .use(setup)
     .onAfterHandle(responseMiddleware)
     .onError(errorMiddleware)
-    .get("/", () => "It's works!")
-    .get("/health", () => ({ status: "ok" }))
-    .group("/api", (group) => group.use(profileController));
-  if (bullBoardPlugin) app.use(bullBoardPlugin);
+    .get('/', () => "It's works!")
+    .get('/health', () => ({ status: 'ok' }))
+    .group('/api', (group) => group.use(profileController))
+  if (bullBoardPlugin) app.use(bullBoardPlugin)
   // compose everything BEFORE listen — never .use() after the server is live
-  if (process.env.ENABLE_SWAGGER === "true") {
+  if (process.env.ENABLE_SWAGGER === 'true') {
     app.use(
       swagger({
-        path: "/swagger-ui",
-        provider: "swagger-ui",
+        path: '/swagger-ui',
+        provider: 'swagger-ui',
         documentation: {
           info: {
-            title: "Elysia Forge",
-            description: "Production Ready Elysia Template. API documentation",
-            version: "1.0.0",
+            title: 'Elysia Forge',
+            description: 'Production Ready Elysia Template. API documentation',
+            version: '1.0.0',
           },
           components: {
             securitySchemes: {
               SessionCookie: {
-                type: "apiKey",
-                in: "cookie",
-                name: "better-auth.session_token",
+                type: 'apiKey',
+                in: 'cookie',
+                name: 'better-auth.session_token',
                 description:
-                  "Better Auth session cookie. Sign in via POST /api/auth/sign-in/username (same origin as this Swagger UI); the browser stores the cookie and subsequent \"Try it out\" calls carry it.",
+                  'Better Auth session cookie. Sign in via POST /api/auth/sign-in/username (same origin as this Swagger UI); the browser stores the cookie and subsequent "Try it out" calls carry it.',
               },
             },
           },
         },
       }),
-    );
+    )
   }
 
-  app.listen(Number(process.env.PORT ?? 3000));
+  app.listen(Number(process.env.PORT ?? 3000))
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 3000
   console.log(`
   _____ _         _         ___
  | ____| |_   _ __(_) __ _  / _ \\ _ __   ___
@@ -112,30 +117,30 @@ export const main = async () => {
           |___/
   Elysia One — the all-in-one Turborepo Elysia + React template
   written by lilhuy0405
-`);
-  console.log(`🦊 Server:     http://localhost:${port}`);
-  if (process.env.ENABLE_SWAGGER === "true") {
-    console.log(`📚 Swagger:    http://localhost:${port}/swagger-ui`);
+`)
+  console.log(`🦊 Server:     http://localhost:${port}`)
+  if (process.env.ENABLE_SWAGGER === 'true') {
+    console.log(`📚 Swagger:    http://localhost:${port}/swagger-ui`)
   }
-  if (process.env.ENABLE_BULL_BOARD === "true") {
+  if (process.env.ENABLE_BULL_BOARD === 'true') {
     // Never print BULL_BOARD_PASSWORD — this line ends up in stdout, which
     // routinely flows into a log aggregator. Print the username only, as a
     // reminder that Basic Auth is on, not a credential.
     console.log(
       `📊 Bull Board: http://localhost:${port}/bull-board (user: ${process.env.BULL_BOARD_USER})`,
-    );
+    )
   }
   const shutdown = async (signal: string) => {
-    logger.info(`${signal} received, shutting down...`);
-    await app.stop();
-    await orm.close(); // release the pool this process owns
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  process.on("SIGINT", () => void shutdown("SIGINT"));
+    logger.info(`${signal} received, shutting down...`)
+    await app.stop()
+    await orm.close() // release the pool this process owns
+    process.exit(0)
+  }
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
+  process.on('SIGINT', () => void shutdown('SIGINT'))
 
-  return app;
-};
+  return app
+}
 
 // `require.main === module` is true only when this file is the process
 // entry point (`bun run src/index.ts`) — false when a test file `import`s
@@ -151,9 +156,9 @@ export const main = async () => {
 // of scope for this change.
 if (require.main === module) {
   main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+    console.error(err)
+    process.exit(1)
+  })
 }
 //eden treaty export type for FE apps
-export type App = Awaited<ReturnType<typeof main>>;
+export type App = Awaited<ReturnType<typeof main>>

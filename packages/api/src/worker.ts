@@ -22,14 +22,18 @@ const main = async () => {
   ]
 
   for (const w of workers) {
-    w.on('completed', (job) => logger.info(`[${w.name}] job ${job.id} completed`))
+    w.on('completed', (job) =>
+      logger.info(`[${w.name}] job ${job.id} completed`),
+    )
     w.on('failed', (job, err) =>
       logger.error(`[${w.name}] job ${job?.id} failed: ${err.message}`),
     )
     w.on('error', (err) => logger.error(`[${w.name}] worker error`, err))
   }
 
-  logger.info(`Worker process started, consuming: ${workers.map((w) => w.name).join(', ')}`)
+  logger.info(
+    `Worker process started, consuming: ${workers.map((w) => w.name).join(', ')}`,
+  )
 
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received, closing workers...`)

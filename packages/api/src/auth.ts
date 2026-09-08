@@ -39,11 +39,23 @@ interface AuthSessionShape {
 
 interface AuthApi {
   signUpEmail(input: {
-    body: { email: string; password: string; name: string; username?: string; displayUsername?: string; callbackURL?: string }
+    body: {
+      email: string
+      password: string
+      name: string
+      username?: string
+      displayUsername?: string
+      callbackURL?: string
+    }
   }): Promise<{ token: string | null; user: AuthUserShape }>
   signInUsername(input: {
     body: { username: string; password: string; rememberMe?: boolean }
-  }): Promise<{ redirect: boolean; token: string; url?: string | null; user: AuthUserShape }>
+  }): Promise<{
+    redirect: boolean
+    token: string
+    url?: string | null
+    user: AuthUserShape
+  }>
   // Added in Phase 02 for macros/auth.ts's session resolve. `headers` must be
   // the real WinterCG `Headers` from the incoming request (carries the
   // `better-auth.session_token` cookie) — a plain object will not work.
@@ -85,7 +97,9 @@ const createAuth = (orm: MikroORM) =>
     // session tokens and CSRF state with this.
     secret: process.env.BETTER_AUTH_SECRET,
     // Public origin of THIS api, used for OAuth callback construction.
-    baseURL: process.env.BETTER_AUTH_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
+    baseURL:
+      process.env.BETTER_AUTH_URL ??
+      `http://localhost:${process.env.PORT ?? 3000}`,
     trustedOrigins: clientOrigins,
     // Do NOT set advanced.defaultCookieAttributes.sameSite — the default is
     // already 'lax' (plan.md D5); an explicit override is one more thing to
@@ -119,7 +133,12 @@ const createAuth = (orm: MikroORM) =>
       // Google OAuth profile mapping could both set `role: 'admin'`. This is
       // the single highest-severity item in the migration.
       additionalFields: {
-        role: { type: 'string', required: false, defaultValue: 'user', input: false },
+        role: {
+          type: 'string',
+          required: false,
+          defaultValue: 'user',
+          input: false,
+        },
       },
     },
     session: { modelName: 'authSession' },
@@ -140,12 +159,16 @@ const createAuth = (orm: MikroORM) =>
                 userId: user.id,
                 // Google sign-ins never collect a username; fall back to
                 // email so the queue payload always has a display string.
-                username: (user as { username?: string | null }).username ?? user.email,
+                username:
+                  (user as { username?: string | null }).username ?? user.email,
               })
             } catch (e) {
               // Swallow-and-log: a Redis outage must never turn a successful
               // signup into a failed one.
-              logger.error(`failed to enqueue send-welcome-email for user ${user.id}`, e)
+              logger.error(
+                `failed to enqueue send-welcome-email for user ${user.id}`,
+                e,
+              )
             }
           },
         },
@@ -174,7 +197,10 @@ const createAuth = (orm: MikroORM) =>
 // upstream has fixed the underlying zod-v4 declaration-emit bug (see the
 // TS2883 note above). `handler` is typed here (not on `AuthApi`) because it's
 // a property of the auth instance itself, not of `auth.api`.
-export type Auth = { api: AuthApi; handler: (request: Request) => Promise<Response> }
+export type Auth = {
+  api: AuthApi
+  handler: (request: Request) => Promise<Response>
+}
 
 let instance: Promise<Auth> | null = null
 
@@ -189,4 +215,5 @@ let instance: Promise<Auth> | null = null
 // once, serially, before .listen()) — fixed anyway since it's a one-line
 // change and a latent footgun for any future concurrent boot-time caller.
 export const initAuth = (): Promise<Auth> =>
-  (instance ??= (async () => createAuth((await initORM()).orm) as unknown as Auth)())
+  (instance ??= (async () =>
+    createAuth((await initORM()).orm) as unknown as Auth)())

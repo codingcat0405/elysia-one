@@ -23,7 +23,9 @@ beforeAll(async () => {
 
 async function truncateAuthTables() {
   const { orm } = await initORM()
-  await orm.em.getConnection().execute('TRUNCATE "account","session","user","verification" CASCADE')
+  await orm.em
+    .getConnection()
+    .execute('TRUNCATE "account","session","user","verification" CASCADE')
 }
 
 async function signUp(overrides: Record<string, unknown> = {}) {
@@ -62,17 +64,27 @@ describe('profile routes (real Postgres + Redis)', () => {
     expect(signupRes.status).toBe(200)
     const cookie = sessionCookie(signupRes)
 
-    const res = await app.handle(new Request('http://localhost/api/profile/me', { headers: { cookie } }))
+    const res = await app.handle(
+      new Request('http://localhost/api/profile/me', { headers: { cookie } }),
+    )
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toEqual({ id: expect.any(String), username: 'alice', role: 'user' })
+    expect(body).toEqual({
+      id: expect.any(String),
+      username: 'alice',
+      role: 'user',
+    })
   })
 
   it('GET /api/profile/admin is 403 for a plain user', async () => {
     const signupRes = await signUp()
     const cookie = sessionCookie(signupRes)
 
-    const res = await app.handle(new Request('http://localhost/api/profile/admin', { headers: { cookie } }))
+    const res = await app.handle(
+      new Request('http://localhost/api/profile/admin', {
+        headers: { cookie },
+      }),
+    )
     expect(res.status).toBe(403)
   })
 
@@ -80,14 +92,22 @@ describe('profile routes (real Postgres + Redis)', () => {
     // The single highest-severity invariant in this codebase (auth.ts's
     // `role: { input: false }`) — this test is the automated version of the
     // manual curl+psql check run during the Better Auth migration.
-    const signupRes = await signUp({ email: 'eve@example.com', username: 'eve', role: 'admin' })
+    const signupRes = await signUp({
+      email: 'eve@example.com',
+      username: 'eve',
+      role: 'admin',
+    })
     expect(signupRes.status).toBe(200)
     const body = await signupRes.json()
     expect(body.user.role).toBe('user')
 
     // Also verify via the actual authorization path, not just the response body.
     const cookie = sessionCookie(signupRes)
-    const res = await app.handle(new Request('http://localhost/api/profile/admin', { headers: { cookie } }))
+    const res = await app.handle(
+      new Request('http://localhost/api/profile/admin', {
+        headers: { cookie },
+      }),
+    )
     expect(res.status).toBe(403)
   })
 

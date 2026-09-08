@@ -28,14 +28,19 @@ describe('requireBasicAuth', () => {
 
   it('throws UnauthorizedError with no Authorization header', () => {
     const set = fakeSet()
-    expect(() => requireBasicAuth()({ headers: {}, set })).toThrow(UnauthorizedError)
+    expect(() => requireBasicAuth()({ headers: {}, set })).toThrow(
+      UnauthorizedError,
+    )
     expect(set.headers['WWW-Authenticate']).toContain('Basic')
   })
 
   it('throws UnauthorizedError for a non-Basic scheme', () => {
     const set = fakeSet()
     expect(() =>
-      requireBasicAuth()({ headers: { authorization: 'Bearer sometoken' }, set }),
+      requireBasicAuth()({
+        headers: { authorization: 'Bearer sometoken' },
+        set,
+      }),
     ).toThrow(UnauthorizedError)
   })
 

@@ -3,7 +3,7 @@ import { createBullBoard } from '@bull-board/api'
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'
 import { ElysiaAdapter } from '@bull-board/elysia'
 import { userQueue } from './modules/user/queue'
-import { requireBasicAuth } from './utils/basic-auth';
+import { requireBasicAuth } from './utils/basic-auth'
 
 // Exposes internal job payloads/data — must never be public.
 // Mounted at top-level /bull-board (see index.ts), gated by HTTP Basic Auth

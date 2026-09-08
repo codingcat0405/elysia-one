@@ -23,7 +23,8 @@ describe('getClientOrigins', () => {
   })
 
   it('splits multiple comma-separated origins and trims whitespace', () => {
-    process.env.CLIENT_URL = 'https://app.example.com, https://staging.example.com ,http://localhost:3001'
+    process.env.CLIENT_URL =
+      'https://app.example.com, https://staging.example.com ,http://localhost:3001'
     expect(getClientOrigins()).toEqual([
       'https://app.example.com',
       'https://staging.example.com',

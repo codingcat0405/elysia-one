@@ -2,11 +2,9 @@
 import type { CacheAdapter } from '@mikro-orm/core'
 import { getRedis } from './redis'
 
-const DEFAULT_TTL_MS = 1000 
+const DEFAULT_TTL_MS = 1000
 const PREFIX = 'mikro:cache:'
 class RedisCacheAdapter implements CacheAdapter {
-
-
   private key(name: string) {
     return `${PREFIX}${name}`
   }
@@ -23,7 +21,12 @@ class RedisCacheAdapter implements CacheAdapter {
     }
   }
 
-  async set(name: string, data: any, origin: string, expiration?: number): Promise<void> {
+  async set(
+    name: string,
+    data: any,
+    origin: string,
+    expiration?: number,
+  ): Promise<void> {
     const redis = await getRedis()
     const payload = JSON.stringify({ data, origin })
     const ttl = expiration && expiration > 0 ? expiration : DEFAULT_TTL_MS
@@ -40,7 +43,13 @@ class RedisCacheAdapter implements CacheAdapter {
     // SCAN instead of KEYS: non-blocking, safe on a shared/production Redis
     let cursor = '0'
     do {
-      const [next, keys] = await redis.scan(cursor, 'MATCH', `${PREFIX}*`, 'COUNT', 100)
+      const [next, keys] = await redis.scan(
+        cursor,
+        'MATCH',
+        `${PREFIX}*`,
+        'COUNT',
+        100,
+      )
       cursor = next
       if (keys.length) await redis.del(...keys)
     } while (cursor !== '0')
@@ -55,4 +64,4 @@ class RedisCacheAdapter implements CacheAdapter {
   }
 }
 
-export default RedisCacheAdapter;
+export default RedisCacheAdapter

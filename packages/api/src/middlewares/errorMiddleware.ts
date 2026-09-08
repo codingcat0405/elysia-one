@@ -19,12 +19,14 @@ const errorMiddleware = ({ code, error, set }: any) => {
     try {
       validationError = JSON.parse(error.message)
     } catch {
-      logger.error('VALIDATION error.message was not valid JSON', { raw: error.message })
+      logger.error('VALIDATION error.message was not valid JSON', {
+        raw: error.message,
+      })
     }
     return {
       message: validationError?.summary ?? 'Validation error',
       errors: validationError?.errors ?? [],
-      status: 400
+      status: 400,
     }
   }
 

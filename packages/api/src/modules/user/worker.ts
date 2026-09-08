@@ -16,7 +16,9 @@ export function createUserJobProcessor(orm: MikroORM) {
         const user = await em.findOne(AuthUser, { id: job.data.userId })
         if (!user) {
           // don't retry forever for a user that no longer exists
-          logger.warn(`send-welcome-email: user ${job.data.userId} not found, skipping`)
+          logger.warn(
+            `send-welcome-email: user ${job.data.userId} not found, skipping`,
+          )
           return
         }
         // TODO: plug in real email provider
