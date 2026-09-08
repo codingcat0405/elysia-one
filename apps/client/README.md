@@ -44,6 +44,11 @@ Docker: `Dockerfile` (build from the repo root: `docker build -f apps/client/Doc
 
 This only works once `packages/api` has been built (`bun run build` there, or `bunx turbo build --filter=api` from the root) — that's what produces `dist/index.d.ts`, which is what this package's `types` resolution actually reads. It is **not** rebuilt automatically by `bun run dev`. If routes/types look stale, rebuild `packages/api` first.
 
+## Code quality (linting & formatting)
+
+- **Linting:** `bun run lint` (from root or here) runs `oxlint` via Turborepo — shared config at the repo root covers all workspaces.
+- **Formatting:** `bun run format` and `bun run format:check` run from the repo root only (not via Turborepo) with Prettier's shared root-level config.
+
 ## Conventions
 
 - Import alias `#/*` → `src/*` (see `tsconfig.json` / `package.json`'s `imports`) — used instead of relative `../../` paths.

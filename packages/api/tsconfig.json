@@ -11,15 +11,9 @@
     "strict": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "types": [
-      "bun-types"
-    ],
+    "types": ["bun-types"],
     "skipLibCheck": true
   },
-  "include": [
-    "./src"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["./src"],
+  "exclude": ["node_modules"]
 }

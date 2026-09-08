@@ -22,7 +22,7 @@ Non-negotiable consequences:
 2. **The frontend's types come from a build artifact, not live source.** `packages/api/package.json`'s `"types"` field points at `dist/index.d.ts`, produced by `bun run build` (`tsc --emitDeclarationOnly`) in `packages/api`. `dist/` is gitignored, and Turborepo's `dev` task has **no** `dependsOn: build` — nothing rebuilds it for you. After changing a route path, adding/removing a route, or changing a `model.ts` body/response schema in `packages/api`, run `bun run build` there (or `bunx turbo build --filter=api`) before trusting `apps/client`'s types or before it will pick up the change at all.
 3. **Treat `packages/api` routes/schemas as a public API contract from the frontend's perspective.** A schema change isn't just a backend refactor — it can silently break `apps/client`'s type-checking (stale `dist/` = stale types, not a compile error) or its runtime behavior (missing field, renamed field). When you change a route in `packages/api`, check `apps/client` for callers of that route in the same change.
 4. **Don't duplicate the API contract by hand** — no manually-written request/response TypeScript interfaces in `apps/client` for data that Eden Treaty already types from `App`. If Eden's inferred type is awkward for a specific case, fix the backend's `model.ts` schema rather than working around it with a local hand-rolled type.
-5. **Scoped exception — auth flows use Better Auth's own client, not Eden Treaty.** `apps/client/src/lib/auth-client.ts` is the *only* sanctioned non-Eden path to the API, and it may only be used for authentication: sign-up, sign-in (username/password and Google), sign-out, and session lookup. Better Auth serves `/api/auth/*` from a mounted handler that Elysia never types, so those endpoints cannot appear in `App` and Eden cannot reach them; OAuth in particular is a browser redirect, not a typed JSON call. Everything that is not authentication — including `/api/profile/*` — still goes through `api.<path>.<method>()` in `eden-client.ts`. Do not add a third client, and do not route non-auth calls through `authClient`.
+5. **Scoped exception — auth flows use Better Auth's own client, not Eden Treaty.** `apps/client/src/lib/auth-client.ts` is the _only_ sanctioned non-Eden path to the API, and it may only be used for authentication: sign-up, sign-in (username/password and Google), sign-out, and session lookup. Better Auth serves `/api/auth/*` from a mounted handler that Elysia never types, so those endpoints cannot appear in `App` and Eden cannot reach them; OAuth in particular is a browser redirect, not a typed JSON call. Everything that is not authentication — including `/api/profile/*` — still goes through `api.<path>.<method>()` in `eden-client.ts`. Do not add a third client, and do not route non-auth calls through `authClient`.
 
 ## Auth model (spans both packages)
 
@@ -38,6 +38,9 @@ bun install                        # once, from repo root
 bun run dev                        # turbo: runs client + api dev servers
 bun run build                      # turbo: builds every workspace (needed for api's dist/index.d.ts)
 bun run check-types                # turbo: tsc --noEmit across every workspace
+bun run lint                       # turbo: oxlint across every workspace
+bun run format                     # prettier: format all files (root-only, not via turbo)
+bun run format:check               # prettier: check formatting without writing (root-only, not via turbo)
 bunx turbo dev --filter=client     # single workspace
 bunx turbo build --filter=api      # single workspace — run after backend route/schema changes
 ```

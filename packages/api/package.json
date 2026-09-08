@@ -9,6 +9,7 @@
     "worker:dev": "bun run --watch src/worker.ts",
     "worker": "bun run src/worker.ts",
     "build": "tsc",
+    "lint": "oxlint",
     "check-types": "bunx tsc --noEmit",
     "test": "bun test"
   },

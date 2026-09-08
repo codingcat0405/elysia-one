@@ -18,6 +18,7 @@ If you're writing a query and typed `orm.em` instead of `em` (or a service built
 ### 2. Services are per-unit-of-work, never singletons
 
 A service instance is constructed fresh inside `setup.ts`'s `.derive()` (for HTTP) for every single request, holding that request's `em`. Do **not**:
+
 - Instantiate a service once at module load time and import the instance.
 - Cache a service instance across requests/jobs.
 - Give a service a longer lifetime than the `em` it holds.
@@ -48,6 +49,7 @@ Services and macros throw from `utils/http-errors.ts` (`BadRequestError`, `Unaut
 ### 7. Return entities, define response schemas — don't hand-serialize
 
 `middlewares/responseMiddleware.ts` converts any MikroORM entity (or array of entities) returned from a handler into a plain object via `wrap(entity).toObject()`, which drops `@Property({ hidden: true })` fields (e.g. `User.password`) automatically. Two rules follow:
+
 - Return the entity itself from handlers; don't manually pick fields unless you need a shape the entity can't express.
 - Still declare a `response` typebox schema per route (see `model.ts` files) — it's an independent guarantee against leaking fields if someone later removes `hidden: true` or adds a new sensitive column.
 
@@ -61,16 +63,17 @@ Services and macros throw from `utils/http-errors.ts` (`BadRequestError`, `Unaut
 
 ### 10. No application code reads or writes an auth cookie
 
-Better Auth's mounted handler (`auth.handler`, wired in `index.ts`'s `.mount()`) issues and clears the `better-auth.session_token` cookie entirely on its own. The only session *read* anywhere in this codebase is `auth.api.getSession({ headers })` inside `macros/auth.ts`, which hands Better Auth the real request headers and never touches `cookie` itself. If you find yourself reaching for Elysia's `cookie` context to set, read, or clear anything auth-related, stop — the design has been misunderstood; route it through `auth.ts` / the mounted handler instead.
+Better Auth's mounted handler (`auth.handler`, wired in `index.ts`'s `.mount()`) issues and clears the `better-auth.session_token` cookie entirely on its own. The only session _read_ anywhere in this codebase is `auth.api.getSession({ headers })` inside `macros/auth.ts`, which hands Better Auth the real request headers and never touches `cookie` itself. If you find yourself reaching for Elysia's `cookie` context to set, read, or clear anything auth-related, stop — the design has been misunderstood; route it through `auth.ts` / the mounted handler instead.
 
 One narrow, necessary exception to the broader "never touch the global `EntityManager`" rule above: `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly and does not fork the `EntityManager` itself. Both the `.mount()` call in `index.ts` and `checkAuth`'s `auth.api.getSession()` call in `macros/auth.ts` wrap their Better Auth calls in MikroORM's `RequestContext.create(orm.em, () => ...)` to work around this — that AsyncLocalStorage-based fork is what invariant #1 is actually enforcing there, just via a different mechanism than `setup.ts`'s `em.fork()`. Don't remove it as if it were a stray `orm.em` violation.
 
 ### 11. `export type App` (`index.ts`) is a public contract for `apps/client`
 
-`apps/client` imports this type via `import type { App } from 'api'` and drives its Eden Treaty client off it (`apps/client/src/lib/eden-client.ts`) — that's the frontend's *only* type-safety net against the API's actual routes/schemas. Consequences:
+`apps/client` imports this type via `import type { App } from 'api'` and drives its Eden Treaty client off it (`apps/client/src/lib/eden-client.ts`) — that's the frontend's _only_ type-safety net against the API's actual routes/schemas. Consequences:
+
 - Don't remove or rename the `App` export, and don't change `main`'s return shape in a way that breaks it.
 - A route path change, a `model.ts` body/response schema change, or a new/removed route is effectively an API contract change — treat it with the same care as changing a public function signature.
-- The frontend only sees the *built* declaration (`dist/index.d.ts`, from `bun run build` / `tsc --emitDeclarationOnly`) — Turborepo's `dev` task has no `dependsOn: build`, so nothing rebuilds it automatically. After changing routes/schemas here, rebuild this package (or run `bunx turbo build --filter=api`) so `apps/client` isn't type-checking against a stale contract.
+- The frontend only sees the _built_ declaration (`dist/index.d.ts`, from `bun run build` / `tsc --emitDeclarationOnly`) — Turborepo's `dev` task has no `dependsOn: build`, so nothing rebuilds it automatically. After changing routes/schemas here, rebuild this package (or run `bunx turbo build --filter=api`) so `apps/client` isn't type-checking against a stale contract.
 
 ## Adding a new feature module (checklist)
 
@@ -86,6 +89,7 @@ Mirror `src/modules/profile/` — the reference module post-migration. It has no
 ## Testing
 
 `bun test`, co-located `*.test.ts` next to the source they cover. Two layers — see `README.md`'s "Testing" section for the full explanation:
+
 - Pure unit tests (`utils/*.test.ts`, `middlewares/errorMiddleware.test.ts`) — no external services.
 - Route-level tests (`modules/profile/profile.test.ts`) — `app.handle(new Request(...))` against **real** Postgres + Redis, no mocks. `main` is `export`ed from `index.ts` specifically so tests can call it and get a live `Elysia` instance; its bottom-of-file self-invocation is guarded by `if (require.main === module)` so importing it for a test never double-boots the real server. `beforeEach` truncates the auth tables — write new route tests the same way, don't leave rows behind for the next test/run.
 
@@ -95,6 +99,8 @@ Run via `bun run test` (root or here), not a bare `bun test` from the repo root 
 
 ## Before you finish
 
-- Run `bun run check-types` (`bunx tsc --noEmit`) — this template has caught real bugs (missing `.js` extensions on dynamic `import()` under `NodeNext`, missing `.use(setup)` in a controller) exactly this way.
+- Run `bun run check-types` (`bunx tsc --noEmit`), `bun run lint` (oxlint), and from the repo root: `bun run format:check` (Prettier).
+  - Linting is Turborepo-orchestrated and can be run locally here.
+  - Formatting is always done from the repo root with `bun run format` / `bun run format:check` (not via Turborepo).
 - Run `bun test` (needs Postgres + Redis reachable — see "Testing" above) if you touched anything under `modules/profile/`, `macros/auth.ts`, `auth.ts`, or `middlewares/`.
 - Don't add a new `.env` var without adding it to `.env.example` with a comment on when it's required.

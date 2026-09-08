@@ -14,7 +14,7 @@ Each package/app is 100% TypeScript. **AI agents and contributors: read `AGENTS.
 ### Utilities
 
 - [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
+- [oxlint](https://oxc.rs/docs/guide/usage/linter.html) for code linting
 - [Prettier](https://prettier.io) for code formatting
 - [Turborepo](https://turborepo.dev/) for task orchestration and caching
 
@@ -42,6 +42,13 @@ bun run dev:worker   # BullMQ worker (packages/api/src/worker.ts), separate proc
 bun run lint
 bun run check-types
 bun run test         # packages/api's tests need Postgres + Redis reachable (real .env)
+```
+
+Format code (root-only, not via Turborepo):
+
+```sh
+bun run format       # prettier --write .
+bun run format:check # prettier --check .
 ```
 
 Use `bun run test`, not a bare `bun test` from the repo root — the latter recursively finds test files across both workspaces but loads env relative to the root (where there's no `.env`), so `packages/api`'s DB-backed tests fail before Postgres/Redis even matter. See `packages/api/README.md`'s "Testing" section.

@@ -1,0 +1,1 @@
+- [Better Auth migration architecture + deferred findings](project_better-auth-migration.md) — elysia-one repo, RequestContext wrap pattern, index gap, Zustand SSR invariant

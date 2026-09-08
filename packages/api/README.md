@@ -16,6 +16,10 @@ Google sign-in is optional — see `.env.example`'s `GOOGLE_CLIENT_ID`/`GOOGLE_C
 - Bull Board (job dashboard): `http://localhost:3000/bull-board`, opt in with `ENABLE_BULL_BOARD=true` + `BULL_BOARD_USER`/`BULL_BOARD_PASSWORD` (HTTP Basic Auth, not JWT)
 - Background worker (BullMQ), separate process: `bun worker:dev`
 
+**Linting and formatting:** Code quality is managed at the repository root:
+- `bun run lint` (from root or here via Turborepo) runs `oxlint` — shared config across all workspaces.
+- `bun run format` / `bun run format:check` (from root only) runs Prettier with a shared root-level config.
+
 Docker: the `Dockerfile` uses `turbo prune`, which needs the **repo root** as build context, not this directory — see the root [`README.md`](../../README.md#docker):
 
 ```bash
@@ -116,10 +120,10 @@ Mounted at `/bull-board`, gated by HTTP Basic Auth (`utils/basic-auth.ts`, const
 
 ### Redis: two separate clients, on purpose
 
-| Client | File | Used by | Notes |
-|---|---|---|---|
-| Shared client | `utils/redis.ts` (`getRedis()`) | `RedisCacheAdapter` | Singleton, retry-limited, safe for normal commands |
-| Dedicated client | `utils/bull-connection.ts` | BullMQ `Queue`/`Worker` | `maxRetriesPerRequest: null`, required for blocking ops |
+| Client           | File                            | Used by                 | Notes                                                   |
+| ---------------- | ------------------------------- | ----------------------- | ------------------------------------------------------- |
+| Shared client    | `utils/redis.ts` (`getRedis()`) | `RedisCacheAdapter`     | Singleton, retry-limited, safe for normal commands      |
+| Dedicated client | `utils/bull-connection.ts`      | BullMQ `Queue`/`Worker` | `maxRetriesPerRequest: null`, required for blocking ops |
 
 `mikro-orm.config.ts` still falls back to `MemoryCacheAdapter` (per-process, not shared) when `REDIS_URL` is unset, but `index.ts`'s boot-time required-env check means normal `bun dev`/`bun start` never reaches that path — `REDIS_URL` is mandatory. The fallback only matters for code paths that import `db.ts` without going through `index.ts`'s checks (e.g. a future test harness).
 
@@ -135,24 +139,24 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 
 ## Environment variables
 
-| Var | Required | Default | Notes |
-|---|---|---|---|
-| `PORT` | no | `3000` | HTTP port |
-| `DATABASE_URL` | **yes** | — | Postgres connection string |
-| `BETTER_AUTH_SECRET` | **yes** | — | Signs/verifies session tokens and CSRF state; boot fails fast if missing. 32+ chars, `openssl rand -base64 48` |
-| `BETTER_AUTH_URL` | no | `http://localhost:${PORT}` | Public origin of this API; used to construct the OAuth callback URL. Must be the exact public URL in prod |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | no, but paired | — | Google sign-in is enabled only when **both** are set; boot fails fast if exactly one is set. See "Quick start" above for the Google Cloud Console step |
-| `CLIENT_URL` | no | `http://localhost:3001` | Exact browser origin(s) for credentialed CORS, comma-separated for multiple. Also doubles as Better Auth's `trustedOrigins` (Origin/Referer check on state-changing requests). Not boot-required (defaults to the dev port), but a wrong value silently breaks cookie storage in the browser — no boot-time check catches it |
-| `DB_POOL_MIN` / `DB_POOL_MAX` | no | `0` / `10` | Per-process pool; multiply by replica count when sizing Postgres `max_connections` |
-| `DB_POOL_ACQUIRE_TIMEOUT_MS` | no | `10000` | Fail fast instead of hanging |
-| `DB_POOL_IDLE_TIMEOUT_MS` | no | `30000` | Keep under infra idle timeouts |
-| `ENABLE_SWAGGER` | no | disabled | No `NODE_ENV`-based auto-enable — set `true` explicitly to turn on Swagger UI, in dev or prod |
-| `REDIS_URL` | **yes** | — | Boot fails fast if missing (also required for the worker, `bun worker`) |
-| `WORKER_CONCURRENCY` | no | `5` | Jobs processed in parallel, per worker process |
-| `ENABLE_BULL_BOARD` | no | `false` | If `true`, `BULL_BOARD_USER`/`PASSWORD` become required |
-| `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` | conditionally | — | HTTP Basic Auth for `/bull-board` |
-| `NODE_ENV` | no | — | `production` switches log format + Docker default; also enables `Secure` flag on the session cookie |
-| `LOG_LEVEL` | no | `info`(prod)/`debug`(dev) | winston level |
+| Var                                         | Required       | Default                    | Notes                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------- | -------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                      | no             | `3000`                     | HTTP port                                                                                                                                                                                                                                                                                                                    |
+| `DATABASE_URL`                              | **yes**        | —                          | Postgres connection string                                                                                                                                                                                                                                                                                                   |
+| `BETTER_AUTH_SECRET`                        | **yes**        | —                          | Signs/verifies session tokens and CSRF state; boot fails fast if missing. 32+ chars, `openssl rand -base64 48`                                                                                                                                                                                                               |
+| `BETTER_AUTH_URL`                           | no             | `http://localhost:${PORT}` | Public origin of this API; used to construct the OAuth callback URL. Must be the exact public URL in prod                                                                                                                                                                                                                    |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | no, but paired | —                          | Google sign-in is enabled only when **both** are set; boot fails fast if exactly one is set. See "Quick start" above for the Google Cloud Console step                                                                                                                                                                       |
+| `CLIENT_URL`                                | no             | `http://localhost:3001`    | Exact browser origin(s) for credentialed CORS, comma-separated for multiple. Also doubles as Better Auth's `trustedOrigins` (Origin/Referer check on state-changing requests). Not boot-required (defaults to the dev port), but a wrong value silently breaks cookie storage in the browser — no boot-time check catches it |
+| `DB_POOL_MIN` / `DB_POOL_MAX`               | no             | `0` / `10`                 | Per-process pool; multiply by replica count when sizing Postgres `max_connections`                                                                                                                                                                                                                                           |
+| `DB_POOL_ACQUIRE_TIMEOUT_MS`                | no             | `10000`                    | Fail fast instead of hanging                                                                                                                                                                                                                                                                                                 |
+| `DB_POOL_IDLE_TIMEOUT_MS`                   | no             | `30000`                    | Keep under infra idle timeouts                                                                                                                                                                                                                                                                                               |
+| `ENABLE_SWAGGER`                            | no             | disabled                   | No `NODE_ENV`-based auto-enable — set `true` explicitly to turn on Swagger UI, in dev or prod                                                                                                                                                                                                                                |
+| `REDIS_URL`                                 | **yes**        | —                          | Boot fails fast if missing (also required for the worker, `bun worker`)                                                                                                                                                                                                                                                      |
+| `WORKER_CONCURRENCY`                        | no             | `5`                        | Jobs processed in parallel, per worker process                                                                                                                                                                                                                                                                               |
+| `ENABLE_BULL_BOARD`                         | no             | `false`                    | If `true`, `BULL_BOARD_USER`/`PASSWORD` become required                                                                                                                                                                                                                                                                      |
+| `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD`   | conditionally  | —                          | HTTP Basic Auth for `/bull-board`                                                                                                                                                                                                                                                                                            |
+| `NODE_ENV`                                  | no             | —                          | `production` switches log format + Docker default; also enables `Secure` flag on the session cookie                                                                                                                                                                                                                          |
+| `LOG_LEVEL`                                 | no             | `info`(prod)/`debug`(dev)  | winston level                                                                                                                                                                                                                                                                                                                |
 
 ## Deploying with cookie auth
 
@@ -177,8 +181,8 @@ There is no `COOKIE_DOMAIN`-equivalent var wired up — this template assumes cl
 
 ### Running tests — do this from the right place
 
-- **`bun run test` (repo root or here) is the supported entry point.** At the root it runs via Turborepo, which invokes each workspace's own `test` script *inside that workspace's directory* — `packages/api`'s tests run with `packages/api` as the working directory, so its `.env` resolves normally.
-- **Do NOT run a bare `bun test` from the repo root.** Bun's test runner recursively finds every `*.test.ts` file under the current directory regardless of workspace boundaries, so it picks up `apps/client`'s tests too — but it loads env files relative to *that* CWD (the repo root), where there is no `.env` (only `packages/api/.env` exists, one level down). The DB-backed tests fail immediately with `Missing required env var: BETTER_AUTH_SECRET`, before Postgres/Redis reachability even comes into play. Either `cd packages/api && bun test`, or use `bun run test`.
+- **`bun run test` (repo root or here) is the supported entry point.** At the root it runs via Turborepo, which invokes each workspace's own `test` script _inside that workspace's directory_ — `packages/api`'s tests run with `packages/api` as the working directory, so its `.env` resolves normally.
+- **Do NOT run a bare `bun test` from the repo root.** Bun's test runner recursively finds every `*.test.ts` file under the current directory regardless of workspace boundaries, so it picks up `apps/client`'s tests too — but it loads env files relative to _that_ CWD (the repo root), where there is no `.env` (only `packages/api/.env` exists, one level down). The DB-backed tests fail immediately with `Missing required env var: BETTER_AUTH_SECRET`, before Postgres/Redis reachability even comes into play. Either `cd packages/api && bun test`, or use `bun run test`.
 - **Bun's own env precedence for `bun test`** also loads `.env.test` / `.env.test.local` on top of `.env`/`.env.local`, if present (`.env.test` wins on overlapping keys) — a Bun convention, not something this repo currently uses (there's exactly one Postgres/Redis config, reused for `bun dev` and `bun test` alike, truncated between tests rather than isolated in a second database). If you ever want test-specific overrides (e.g. a dedicated test database), add `packages/api/.env.test` — Bun picks it up automatically, no wiring needed.
 
 CI is not set up (see gaps below), so these currently only run when someone runs them locally.
@@ -186,11 +190,10 @@ CI is not set up (see gaps below), so these currently only run when someone runs
 ## Known gaps (don't assume these are solved)
 
 - No CI (`.github/workflows` doesn't exist) — tests exist (see "Testing" above) but nothing runs them automatically.
-- No lint script/config in `package.json`.
 - No rate limiting on `/api/auth/*` (sign-in/sign-up/etc. are unthrottled).
 - No email verification (`user.emailVerified` is always `false`) and no password reset flow — the `verification` table exists (Better Auth core schema) but nothing writes to it; wiring either up means adding a mailer.
 - No `advanced.crossSubDomainCookies` support — see "Deploying with cookie auth" above.
 
 ---
 
-***Created by CodingCat, happy coding!***
+_**Created by CodingCat, happy coding!**_
