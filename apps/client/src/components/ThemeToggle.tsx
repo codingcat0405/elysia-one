@@ -36,6 +36,9 @@ export default function ThemeToggle() {
 
   useEffect(() => {
     const initialMode = getInitialMode()
+    // getInitialMode() reads localStorage/matchMedia, unavailable during SSR,
+    // so the real mode can only be known once mounted on the client.
+    // oxlint-disable-next-line react/set-state-in-effect
     setMode(initialMode)
     applyThemeMode(initialMode)
   }, [])

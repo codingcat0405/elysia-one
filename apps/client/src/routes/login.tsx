@@ -17,6 +17,20 @@ export const Route = createFileRoute('/login')({
   component: LoginPage,
 })
 
+// Module-scoped: closes over nothing component-local, so it's created once
+// instead of on every render.
+async function handleGoogle() {
+  // On success this redirects the browser away before returning. On
+  // failure (e.g. Google not configured on this deployment) it resolves
+  // with `{ error }` rather than throwing — same convention as
+  // signIn.username/signIn.email — so AuthForm's catch needs a real throw.
+  const { error } = await authClient.signIn.social({
+    provider: 'google',
+    callbackURL: `${window.location.origin}/`,
+  })
+  if (error) throw error
+}
+
 function LoginPage() {
   const navigate = useNavigate()
 
@@ -27,18 +41,6 @@ function LoginPage() {
     if (error) throw error // AuthForm renders error.message inline
     // Do not call setUser here: _authed's loader/effect owns store hydration.
     await navigate({ to: '/' })
-  }
-
-  const handleGoogle = async () => {
-    // On success this redirects the browser away before returning. On
-    // failure (e.g. Google not configured on this deployment) it resolves
-    // with `{ error }` rather than throwing — same convention as
-    // signIn.username/signIn.email — so AuthForm's catch needs a real throw.
-    const { error } = await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: `${window.location.origin}/`,
-    })
-    if (error) throw error
   }
 
   return (

@@ -15,6 +15,20 @@ export const Route = createFileRoute('/register')({
   component: RegisterPage,
 })
 
+// Module-scoped: closes over nothing component-local, so it's created once
+// instead of on every render.
+async function handleGoogle() {
+  // On success this redirects the browser away before returning. On
+  // failure (e.g. Google not configured on this deployment) it resolves
+  // with `{ error }` rather than throwing — same convention as
+  // signUp.email — so AuthForm's catch needs a real throw.
+  const { error } = await authClient.signIn.social({
+    provider: 'google',
+    callbackURL: `${window.location.origin}/`,
+  })
+  if (error) throw error
+}
+
 function RegisterPage() {
   const navigate = useNavigate()
 
@@ -39,18 +53,6 @@ function RegisterPage() {
     // needed. Do not call setUser here: _authed's loader/effect owns store
     // hydration (see _authed.tsx).
     await navigate({ to: '/' })
-  }
-
-  const handleGoogle = async () => {
-    // On success this redirects the browser away before returning. On
-    // failure (e.g. Google not configured on this deployment) it resolves
-    // with `{ error }` rather than throwing — same convention as
-    // signUp.email — so AuthForm's catch needs a real throw.
-    const { error } = await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: `${window.location.origin}/`,
-    })
-    if (error) throw error
   }
 
   return (

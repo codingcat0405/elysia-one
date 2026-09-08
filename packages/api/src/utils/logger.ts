@@ -7,9 +7,9 @@ const devFormat = combine(
   colorize({ all: true }),
   timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   errors({ stack: true }), // log full stack traces for Error objects
-  printf(({ level, message, timestamp, stack, ...meta }) => {
+  printf(({ level, message, timestamp: ts, stack, ...meta }) => {
     const extra = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : ''
-    return `${timestamp} ${level}: ${stack || message}${extra}`
+    return `${ts} ${level}: ${stack || message}${extra}`
   }),
 )
 

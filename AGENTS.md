@@ -45,6 +45,15 @@ bunx turbo dev --filter=client     # single workspace
 bunx turbo build --filter=api      # single workspace — run after backend route/schema changes
 ```
 
+## Before shipping (any feature or bugfix, either package)
+
+Run `bun run lint` and `bun run format:check` (or `bun run format` to auto-fix) from repo root, across **both** workspaces, and leave zero errors and zero warnings — not just zero errors. A warning oxlint reports is real signal (dead code, an SSR/render hazard, an inconsistent import) even though it doesn't fail the exit code; don't leave it for someone else to triage later.
+
+- If a rule's suggested fix is genuinely correct for the code (the common case — e.g. hoisting a function that closes over nothing, fixing a shadowed variable), fix it.
+- If a rule fires on a pattern that's intentional and correct for its context (e.g. `react/set-state-in-effect` on a client-only-mount / SSR-hydration flag — see `apps/client/src/components/Header.tsx` and `ThemeToggle.tsx` for worked examples), suppress that specific line with `// oxlint-disable-next-line <rule>` **plus a comment explaining why it's safe** — never a bare disable, and never a broad file-level or config-level disable to silence something that's only safe in one spot. The disable comment must be the line immediately before the flagged code — a comment between the directive and the code breaks the association silently.
+- Don't leave a warning un-triaged with the excuse that it's "pre-existing" — if you touched the file or the feature you're shipping surfaces it, resolve it (fix or justified suppression) before considering the work done.
+- Also run `bun run check-types` and `bun run build` — a clean lint/format pass doesn't substitute for either.
+
 ## Env files
 
 - `packages/api/.env` (from `.env.example`) — `DATABASE_URL`, `BETTER_AUTH_SECRET`, `REDIS_URL` are required at boot (fails fast if missing). `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are optional but paired — boot fails fast if exactly one is set. `CLIENT_URL` is not boot-required — it defaults to `http://localhost:3001` — but must be set correctly for both credentialed CORS and Better Auth's `trustedOrigins` to work outside that default. See `packages/api/README.md` for the full table.

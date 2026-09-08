@@ -53,7 +53,7 @@ Used throughout instead of relative `../../` paths (see `package.json`'s `import
 
 ## Before you finish
 
-- Run `bun run check-types` (`tsc --noEmit`), `bun run lint` (oxlint), and from the repo root: `bun run format:check` (Prettier).
+- Run `bun run check-types` (`tsc --noEmit`), `bun run lint` (oxlint), and from the repo root: `bun run format:check` (Prettier). Zero errors **and** zero warnings before shipping — see root `AGENTS.md`'s "Before shipping" for the fix-vs-suppress rule.
 - If you changed anything under `packages/api`, rebuild it (`bun run build` there) before relying on this package's types.
 - **Note:** Linting (`lint`) is Turborepo-orchestrated and can be run locally; formatting is always done from the repo root with `bun run format` / `bun run format:check` (not via Turborepo).
 

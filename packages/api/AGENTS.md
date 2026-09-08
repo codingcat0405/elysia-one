@@ -99,7 +99,7 @@ Run via `bun run test` (root or here), not a bare `bun test` from the repo root 
 
 ## Before you finish
 
-- Run `bun run check-types` (`bunx tsc --noEmit`), `bun run lint` (oxlint), and from the repo root: `bun run format:check` (Prettier).
+- Run `bun run check-types` (`bunx tsc --noEmit`), `bun run lint` (oxlint), and from the repo root: `bun run format:check` (Prettier). Zero errors **and** zero warnings before shipping — see root `AGENTS.md`'s "Before shipping" for the fix-vs-suppress rule.
   - Linting is Turborepo-orchestrated and can be run locally here.
   - Formatting is always done from the repo root with `bun run format` / `bun run format:check` (not via Turborepo).
 - Run `bun test` (needs Postgres + Redis reachable — see "Testing" above) if you touched anything under `modules/profile/`, `macros/auth.ts`, `auth.ts`, or `middlewares/`.

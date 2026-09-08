@@ -4,13 +4,13 @@ import { initORM } from './db'
 import { initAuth } from './auth'
 import logger from './utils/logger'
 import { getClientOrigins } from './utils/client-origins'
-import cors from '@elysiajs/cors'
+import { cors } from '@elysiajs/cors'
 import { setup } from './middlewares/setup'
 import responseMiddleware from './middlewares/responseMiddleware'
 import errorMiddleware from './middlewares/errorMiddleware'
 import profileController from './modules/profile'
-import Elysia from 'elysia'
-import swagger from '@elysiajs/swagger'
+import { Elysia } from 'elysia'
+import { swagger } from '@elysiajs/swagger'
 
 for (const key of ['BETTER_AUTH_SECRET', 'DATABASE_URL', 'REDIS_URL']) {
   if (!process.env[key]) {

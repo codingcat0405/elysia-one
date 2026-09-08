@@ -31,6 +31,13 @@ type AuthFormProps = {
   onGoogle?: () => Promise<void>
 }
 
+function toErrorMessage(err: unknown) {
+  return (
+    (err as { message?: string } | null)?.message ??
+    'Something went wrong. Please try again.'
+  )
+}
+
 // Shared login / register form. Both screens differ only in copy + submit handler.
 export function AuthForm({
   title,
@@ -50,10 +57,6 @@ export function AuthForm({
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const toErrorMessage = (err: unknown) =>
-    (err as { message?: string } | null)?.message ??
-    'Something went wrong. Please try again.'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

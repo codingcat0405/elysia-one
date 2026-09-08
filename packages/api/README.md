@@ -17,6 +17,7 @@ Google sign-in is optional — see `.env.example`'s `GOOGLE_CLIENT_ID`/`GOOGLE_C
 - Background worker (BullMQ), separate process: `bun worker:dev`
 
 **Linting and formatting:** Code quality is managed at the repository root:
+
 - `bun run lint` (from root or here via Turborepo) runs `oxlint` — shared config across all workspaces.
 - `bun run format` / `bun run format:check` (from root only) runs Prettier with a shared root-level config.
 

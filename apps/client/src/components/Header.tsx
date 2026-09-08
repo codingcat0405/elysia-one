@@ -22,6 +22,10 @@ export default function Header({ initialUser }: { initialUser: User | null }) {
 
   useEffect(() => {
     if (initialUser) setUser(initialUser)
+    // This is the client-mount flag itself (see file header comment), not an
+    // effect reacting to state. There is no non-effect way to detect "we are
+    // now on the client, past hydration" in React.
+    // oxlint-disable-next-line react/set-state-in-effect
     setHydrated(true)
   }, [initialUser, setUser])
 
