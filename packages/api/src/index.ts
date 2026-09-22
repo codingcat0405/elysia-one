@@ -52,10 +52,30 @@ export const main = async () => {
 
   // A wildcard/reflected origin makes the browser discard the auth cookies when
   // credentials:true — origin must be an explicit list, never `true`/`*`.
+  //
+  // `credentials: true` is retained deliberately (phase-01 bearer-token-auth
+  // migration, plan step 5) even though nothing in this app sends cookies
+  // anymore: it is inert for our own traffic, and turning it off is a
+  // behaviour change with a non-zero chance of disturbing Better Auth's own
+  // mounted flows (e.g. the OAuth callback) for zero benefit (YAGNI). The
+  // exact-origin requirement for auth endpoints now comes from
+  // `trustedOrigins` (auth.ts), not from cookie storage.
   const clientOrigins = getClientOrigins()
 
   const app = new Elysia()
-    .use(cors({ origin: clientOrigins, credentials: true }))
+    .use(
+      cors({
+        origin: clientOrigins,
+        credentials: true,
+        // `set-auth-token` (bearer() plugin, auth.ts) is a non-simple
+        // response header — cross-origin JS cannot read it unless the
+        // server explicitly exposes it. Without this, the browser hides the
+        // header from client code on sign-up/sign-in and the whole
+        // bearer-token scheme silently fails while `app.handle()` tests
+        // (which bypass the browser) still pass.
+        exposeHeaders: ['set-auth-token'],
+      }),
+    )
     // `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly — it does NOT
     // fork the EntityManager itself (confirmed in Phase 01: it throws
     // MikroORM's own "Using global EntityManager instance methods ..."
@@ -91,12 +111,16 @@ export const main = async () => {
           },
           components: {
             securitySchemes: {
-              SessionCookie: {
-                type: 'apiKey',
-                in: 'cookie',
-                name: 'better-auth.session_token',
+              // Replaces the old SessionCookie scheme (phase-01
+              // bearer-token-auth migration) — the cookie is still issued by
+              // Better Auth, but it is no longer the documented auth
+              // mechanism for this API. Removing the cookie scheme here is
+              // intentional, not an oversight.
+              BearerAuth: {
+                type: 'http',
+                scheme: 'bearer',
                 description:
-                  'Better Auth session cookie. Sign in via POST /api/auth/sign-in/username (same origin as this Swagger UI); the browser stores the cookie and subsequent "Try it out" calls carry it.',
+                  'Sign in via POST /api/auth/sign-in/username and copy the set-auth-token response header.',
               },
             },
           },

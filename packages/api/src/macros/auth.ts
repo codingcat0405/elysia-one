@@ -15,9 +15,15 @@ const authMacro = new Elysia({ name: 'macro.auth' }).macro({
     return {
       resolve: async ({ request }): Promise<{ user: AuthUser }> => {
         const [auth, { orm }] = await Promise.all([initAuth(), initORM()])
-        // Better Auth reads the session cookie straight off the real request
-        // headers — no cookie schema needed on this macro at all (unlike the
-        // old JWT version, which had to work around elysia#1375).
+        // Better Auth reads the session straight off the real request
+        // headers — either the `better-auth.session_token` cookie (still
+        // issued, but no longer the app's documented mechanism) or an
+        // `Authorization: Bearer <token>` header (bearer() plugin, auth.ts;
+        // verified empirically in modules/profile/profile.test.ts's gate
+        // test, phase-01 bearer-token-auth migration — no shim needed here,
+        // getSession resolved the bearer token unmodified). No cookie schema
+        // needed on this macro at all (unlike the old JWT version, which had
+        // to work around elysia#1375).
         //
         // `better-auth-mikro-orm@0.5.0` calls `orm.em.*` directly (does not
         // fork itself — see auth.ts / index.ts's `.mount()` comment for the

@@ -1,44 +1,28 @@
-import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Button } from '#/components/ui/button.tsx'
 import ThemeToggle from './ThemeToggle'
-import { authClient } from '#/lib/auth-client.ts'
+import { signOut } from '#/lib/auth-client.ts'
 import { useUserStore } from '#/stores/user-store.ts'
-import type { User } from '#/stores/user-store.ts'
 
-// `initialUser` comes from __root's loader (SSR-aware — reads the httpOnly
-// cookie via the incoming request). `useUserStore` is empty on the server and,
-// on the client, is also still empty on the very first render (before this
-// component's mount effect runs) — so both first renders agree with each
-// other by preferring `initialUser` until hydration, avoiding a
-// logged-out-then-flip flash. `hydrated` (not `user.id === ''`) gates the
-// switch to the live store: `id === ''` alone can't tell "not yet seeded" apart
-// from "just explicitly logged out", which would otherwise mask a real
-// clearUser() behind the stale initialUser until the next navigation resolves.
-export default function Header({ initialUser }: { initialUser: User | null }) {
+// No SSR session anymore — the store is empty on the server and on the
+// client's first render alike, so both agree (logged-out) and there is no
+// hydration mismatch to guard against. This does mean every first paint
+// flashes logged-out for one round-trip until a sync effect (`_authed.tsx`'s
+// guard, or `__root.tsx`'s display-only sync on public pages) populates the
+// store — unavoidable without a cookie.
+export default function Header() {
   const navigate = useNavigate()
-  const { user, setUser, clearUser } = useUserStore()
-  const [hydrated, setHydrated] = useState(false)
-
-  useEffect(() => {
-    if (initialUser) setUser(initialUser)
-    // This is the client-mount flag itself (see file header comment), not an
-    // effect reacting to state. There is no non-effect way to detect "we are
-    // now on the client, past hydration" in React.
-    // oxlint-disable-next-line react/set-state-in-effect
-    setHydrated(true)
-  }, [initialUser, setUser])
-
-  const displayUser = hydrated ? user : initialUser
-  const isAuthed = displayUser != null && displayUser.id !== ''
+  const { user, clearUser } = useUserStore()
+  const isAuthed = user.id !== ''
 
   const handleLogout = async () => {
     // Clear local state and navigate even if the network call fails —
-    // otherwise a user with no connectivity can never log out.
+    // otherwise a user with no connectivity can never log out. signOut()
+    // (lib/auth-client.ts) always clears the stored token in its `finally`.
     try {
-      await authClient.signOut()
+      await signOut()
     } catch {
-      // ignore — cookies may already be gone/expired, that's still "logged out"
+      // ignore — session may already be gone/expired, that's still "logged out"
     } finally {
       clearUser()
       await navigate({ to: '/login' })
@@ -60,7 +44,7 @@ export default function Header({ initialUser }: { initialUser: User | null }) {
           {isAuthed ? (
             <>
               <span className="text-[var(--sea-ink-soft)]">
-                {displayUser.username}
+                {user.username}
               </span>
               <Button variant="outline" size="sm" onClick={handleLogout}>
                 Log out

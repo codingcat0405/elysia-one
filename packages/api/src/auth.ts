@@ -1,5 +1,5 @@
 import { betterAuth } from 'better-auth'
-import { username } from 'better-auth/plugins'
+import { bearer, username } from 'better-auth/plugins'
 import { mikroOrmAdapter } from 'better-auth-mikro-orm'
 import type { MikroORM } from '@mikro-orm/postgresql'
 import { initORM } from './db'
@@ -57,8 +57,12 @@ interface AuthApi {
     user: AuthUserShape
   }>
   // Added in Phase 02 for macros/auth.ts's session resolve. `headers` must be
-  // the real WinterCG `Headers` from the incoming request (carries the
-  // `better-auth.session_token` cookie) — a plain object will not work.
+  // the real WinterCG `Headers` from the incoming request — carries either
+  // the `better-auth.session_token` cookie (legacy/still-issued flow) or an
+  // `Authorization: Bearer <token>` header (bearer() plugin below, phase-01
+  // of the bearer-token-auth migration, verified empirically against this
+  // route: see modules/profile/profile.test.ts's gate test). A plain object
+  // will not work for either path.
   getSession(input: {
     headers: Headers
   }): Promise<{ session: AuthSessionShape; user: AuthUserShape } | null>
@@ -111,7 +115,13 @@ const createAuth = (orm: MikroORM) =>
     // `username` field, there is no email fallback in this version). The
     // phase-01 plan's step-5 snippet inherited this from a skill/research
     // doc that doesn't match the resolved version — dropped here.
-    plugins: [username()],
+    // bearer(): resolves `Authorization: Bearer <token>` on `getSession`
+    // (macros/auth.ts's checkAuth), in addition to the cookie Better Auth
+    // already issues — additive, does not disable or replace the cookie flow
+    // (plan.md, phase-01: "Not in scope: fighting Better Auth to suppress
+    // Set-Cookie"). `requireSignature` stays default (false): the client
+    // stores the `set-auth-token` response header value verbatim.
+    plugins: [username(), bearer()],
     ...(google && { socialProviders: google }),
     // Renamed off Better Auth's defaults ('user'/'session'/'account'/
     // 'verification'). better-auth-mikro-orm resolves a MikroORM entity class

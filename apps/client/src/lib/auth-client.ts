@@ -1,17 +1,21 @@
 import { createAuthClient } from 'better-auth/react'
 import { usernameClient } from 'better-auth/client/plugins'
-import { createIsomorphicFn } from '@tanstack/react-start'
-import { getRequestHeader } from '@tanstack/react-start/server'
-
-// SSR has no cookie jar — forward the incoming request's Cookie header by hand.
-// createIsomorphicFn keeps the server-only import out of the client bundle.
-const forwardedCookie = createIsomorphicFn()
-  .server(() => getRequestHeader('cookie'))
-  .client(() => undefined)
+import { getAuthToken, setAuthToken, clearAuthToken } from './auth-token'
 
 export const authClient = createAuthClient({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3000',
-  fetchOptions: { credentials: 'include' },
+  fetchOptions: {
+    auth: { type: 'Bearer', token: () => getAuthToken() ?? '' },
+    // Only sign-in/sign-up responses carry `set-auth-token` (exposed via CORS
+    // in packages/api/src/auth.ts) — this fires for every authClient call, so
+    // a single guard here covers both. No call site may pass its own
+    // `fetchOptions.onSuccess`: better-auth lets a per-call one override this
+    // global one, silently dropping the token capture.
+    onSuccess: (ctx) => {
+      const token = ctx.response.headers.get('set-auth-token')
+      if (token) setAuthToken(token)
+    },
+  },
   plugins: [usernameClient()],
 })
 
@@ -21,11 +25,11 @@ export type SessionUser = { id: string; username: string; role: string }
 // no session, API down) to `null` and never throws. Callers decide what "not
 // logged in" means for their own route.
 export async function getSessionUser(): Promise<SessionUser | null> {
+  // No token → logged out (or SSR, where localStorage doesn't exist) —
+  // short-circuits before firing a request that could never succeed.
+  if (!getAuthToken()) return null
   try {
-    const cookie = forwardedCookie()
-    const { data } = await authClient.getSession({
-      fetchOptions: { headers: cookie ? { cookie } : undefined },
-    })
+    const { data } = await authClient.getSession()
     if (!data?.user) return null
 
     const { user } = data
@@ -46,5 +50,16 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     }
   } catch {
     return null
+  }
+}
+
+// A server-side session delete doesn't remove the client's localStorage
+// copy — clear it explicitly, even when the network call fails, so a stale
+// token never keeps attaching itself to requests after sign-out.
+export async function signOut(): Promise<void> {
+  try {
+    await authClient.signOut()
+  } finally {
+    clearAuthToken()
   }
 }

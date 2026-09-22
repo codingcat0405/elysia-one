@@ -9,6 +9,9 @@ import type { Credentials } from '#/components/auth-form.tsx'
 import { authClient, getSessionUser } from '#/lib/auth-client.ts'
 
 export const Route = createFileRoute('/register')({
+  // The session token lives in localStorage, so this is a no-op during SSR
+  // (getSessionUser()'s short-circuit — no token there) and only redirects on
+  // client-side navigation. See login.tsx for the hard-reload caveat.
   beforeLoad: async () => {
     if (await getSessionUser()) throw redirect({ to: '/' })
   },

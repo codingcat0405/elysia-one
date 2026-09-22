@@ -9,8 +9,8 @@ Guide for AI coding agents (Claude Code, Cursor, Copilot, Aider, ...) and human 
 
 Bun workspaces + Turborepo. Two packages:
 
-- `packages/api` — Elysia + MikroORM (PostgreSQL) + BullMQ (Redis) backend. Owns the database, auth (Better Auth: username/password + Google OAuth, session cookie), and background jobs.
-- `apps/client` — TanStack Start + React frontend. Owns nothing durable; it's a typed client over `packages/api`.
+- `packages/api` — Elysia + MikroORM (PostgreSQL) + BullMQ (Redis) backend. Owns the database, auth (Better Auth: username/password + optional Google OAuth, bearer tokens), and background jobs.
+- `apps/client` — TanStack Start + React frontend. Owns the session token in `localStorage`; it's a typed client over `packages/api`.
 
 ## The FE/BE contract: Eden Treaty, not a hand-written API client
 
@@ -26,10 +26,10 @@ Non-negotiable consequences:
 
 ## Auth model (spans both packages)
 
-- `packages/api` owns `/api/auth/*` via [Better Auth](https://better-auth.com), mounted on a `better-auth-mikro-orm` adapter over the same MikroORM pool `packages/api` already uses for everything else — no second database connection. Two sign-in methods: username+password and Google OAuth. The session is an httpOnly `better-auth.session_token` cookie at `SameSite=Lax`. Server-side authorization is `checkAuth(roles)` in `packages/api/src/macros/auth.ts`, which calls `auth.api.getSession({ headers })` per request — no JWT verification anywhere. `role` is a server-owned Better Auth `user.additionalFields` entry (`input: false`): it is never settable from client input on sign-up/sign-in, nor from a Google OAuth profile. See `packages/api/AGENTS.md` for backend-side rules.
-- `apps/client` never reads the session cookie (httpOnly, invisible to JavaScript). Auth state is derived via `apps/client/src/lib/auth-client.ts`'s `getSessionUser()` (wraps Better Auth's `authClient.getSession()`), never read from client-side storage. A Zustand store (`apps/client/src/stores/user-store.ts`) mirrors "who's logged in". See `apps/client/AGENTS.md` for frontend-side rules.
-- **`SameSite=Lax` is required, not `Strict`** — the Google OAuth redirect back from `accounts.google.com` is a top-level cross-site navigation, which `SameSite=Strict` cookies do not survive. CSRF defence is therefore Lax's own same-site-for-unsafe-methods behaviour plus Better Auth's `trustedOrigins` check (an explicit Origin/Referer allowlist on state-changing requests) — so `CLIENT_URL` (which feeds `trustedOrigins`) must be the exact production origin, not a wildcard.
-- Don't introduce a second auth mechanism (e.g. a JWT bearer header alongside the session cookie, or a hand-rolled OAuth flow) without updating both packages deliberately — they are not designed to coexist.
+- `packages/api` owns `/api/auth/*` via [Better Auth](https://better-auth.com), mounted on a `better-auth-mikro-orm` adapter over the same MikroORM pool `packages/api` already uses for everything else — no second database connection. Two sign-in methods: username+password and Google OAuth (when enabled). The session is a bearer token: `packages/api` returns it in the `set-auth-token` response header on successful sign-in/sign-up, and `apps/client` stores it in `localStorage`. Every request to authenticated endpoints includes `Authorization: Bearer <token>`. Server-side authorization is `checkAuth(roles)` in `packages/api/src/macros/auth.ts`, which calls `auth.api.getSession({ headers })` per request — no JWT verification anywhere. `role` is a server-owned Better Auth `user.additionalFields` entry (`input: false`): it is never settable from client input on sign-up/sign-in, nor from a Google OAuth profile. See `packages/api/AGENTS.md` for backend-side rules.
+- `apps/client` reads the session token from `apps/client/src/lib/auth-token.ts`, which owns the `localStorage` key. Auth state is derived via `apps/client/src/lib/auth-client.ts`'s `getSessionUser()` (wraps Better Auth's `authClient.getSession()`). A Zustand store (`apps/client/src/stores/user-store.ts`) mirrors "who's logged in". See `apps/client/AGENTS.md` for frontend-side rules.
+- **Bearer tokens are not auto-sent by the browser** — CSRF risk is therefore lower than cookies. An attacker's page cannot automatically include a bearer token in requests the way it can with cookies. Better Auth's `trustedOrigins` check (an explicit Origin/Referer allowlist on state-changing requests) provides an additional layer — so `CLIENT_URL` (which feeds `trustedOrigins`) must be the exact production origin, not a wildcard.
+- **This change was deliberate — don't mix mechanisms.** The app was migrated from httpOnly cookie auth to bearer token auth to unblock cross-site deployments (FE and API on different registrable domains). Do not introduce a second auth mechanism (e.g. JWT tokens alongside bearer tokens, a hand-rolled OAuth flow, or device auth) without updating both packages deliberately — they are not designed to coexist.
 
 ## Commands
 

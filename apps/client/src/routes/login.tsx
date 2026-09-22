@@ -9,8 +9,11 @@ import type { Credentials } from '#/components/auth-form.tsx'
 import { authClient, getSessionUser } from '#/lib/auth-client.ts'
 
 export const Route = createFileRoute('/login')({
-  // Session cookie is httpOnly — check runs server-side (or client, on
-  // client-side nav) via getSessionUser() instead of a synchronous token read.
+  // The session token lives in localStorage, so this is a no-op during SSR
+  // (getSessionUser()'s short-circuit — no token there) and only redirects on
+  // client-side navigation. A hard reload of this route while holding a
+  // valid token still renders the form: `beforeLoad` doesn't re-run
+  // client-side after hydration. Accepted (see phase-03 plan).
   beforeLoad: async () => {
     if (await getSessionUser()) throw redirect({ to: '/' })
   },

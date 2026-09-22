@@ -1,25 +1,19 @@
 import { treaty } from '@elysia/eden'
 import type { App } from 'api'
-import { createIsomorphicFn } from '@tanstack/react-start'
-import { getRequestHeader } from '@tanstack/react-start/server'
+import { getAuthToken } from './auth-token'
 
-// Better Auth's session cookie is httpOnly — there is nothing for client JS to
-// read or attach. In the browser `credentials: 'include'` is enough; during SSR
-// there is no cookie jar at all, so the incoming request's Cookie header has to
-// be forwarded by hand. `createIsomorphicFn` is what keeps the
-// `@tanstack/react-start/server` import (server-only, throws outside a request)
-// out of the client bundle.
-const forwardedCookie = createIsomorphicFn()
-  .server(() => getRequestHeader('cookie'))
-  .client(() => undefined)
-
+// The session token lives in localStorage (see auth-token.ts), not an
+// httpOnly cookie — there is no cookie jar to forward during SSR, and no
+// `credentials: 'include'` needed in the browser. Every request attaches
+// `Authorization: Bearer <token>` by hand when a token exists; `undefined`
+// (no header at all) when it doesn't, including during SSR where
+// `getAuthToken()` always returns `null`.
 const client = treaty<App>(
   import.meta.env.VITE_API_URL ?? 'http://localhost:3000',
   {
-    fetch: { credentials: 'include' },
     headers() {
-      const cookie = forwardedCookie()
-      return cookie ? { cookie } : undefined
+      const token = getAuthToken()
+      return token ? { authorization: `Bearer ${token}` } : undefined
     },
   },
 )

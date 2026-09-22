@@ -1,16 +1,16 @@
-import { createFileRoute, getRouteApi } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api, unwrap } from '#/lib/eden-client.ts'
-
-const authedRoute = getRouteApi('/_authed')
+import { useUserStore } from '#/stores/user-store.ts'
 
 export const Route = createFileRoute('/_authed/')({
   component: HomePage,
 })
 
 function HomePage() {
-  // read straight from the layout loader — no store round-trip, no stale first frame
-  const { user } = authedRoute.useLoaderData()
+  // The layout's loader is gone (no SSR auth) — the guard writes the store
+  // before rendering this route's Outlet, so it's always populated here.
+  const user = useUserStore((s) => s.user)
   // 'checking' avoids flashing "no" before the request resolves.
   const [adminAccess, setAdminAccess] = useState<'checking' | 'yes' | 'no'>(
     'checking',

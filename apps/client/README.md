@@ -8,7 +8,7 @@ TanStack Start + React 19 frontend for the `elysia-one` monorepo. Talks to `pack
 - React 19, Tailwind CSS v4, [shadcn/ui](https://ui.shadcn.com/) (`components/ui/`, style: `new-york`)
 - [Zustand](https://zustand.docs.pmnd.rs/) for global client state (currently: the logged-in user)
 - [`@elysia/eden`](https://elysiajs.com/eden/overview.html) (Eden Treaty) for a fully-typed API client generated from `packages/api`'s `App` type
-- [Better Auth](https://better-auth.com) (username/password + Google OAuth) via `src/lib/auth-client.ts` — the one sanctioned non-Eden path to the API; session is an httpOnly cookie
+- [Better Auth](https://better-auth.com) (username/password + optional Google OAuth) via `src/lib/auth-client.ts` — the one sanctioned non-Eden path to the API; session token is stored in `localStorage` via `src/lib/auth-token.ts`
 
 ## Getting started
 
@@ -33,10 +33,10 @@ Docker: `Dockerfile` (build from the repo root: `docker build -f apps/client/Doc
 
 ## Auth
 
-- Better Auth issues an httpOnly `better-auth.session_token` cookie on sign-in/sign-up (username/password or Google). It's never readable from JavaScript — auth state is derived by calling `getSessionUser()` in `src/lib/auth-client.ts`, which wraps Better Auth's own `authClient.getSession()`.
+- Better Auth returns a session token in the `set-auth-token` response header on sign-in/sign-up (username/password or Google). The token is captured by `src/lib/auth-client.ts` and stored in `localStorage` via `src/lib/auth-token.ts` (namespaced key: `elysia-one.auth_token`). Auth state is derived by calling `getSessionUser()`, which wraps Better Auth's own `authClient.getSession()`.
 - Global "who's logged in" state is a Zustand store (`src/stores/user-store.ts`). `user.id === ''` is the "logged out" sentinel (Better Auth IDs are UUID strings) — there's no separate boolean flag.
-- `src/routes/_authed.tsx` is a pathless layout route: its loader calls `getSessionUser()` (SSR-aware — forwards the incoming request's `Cookie` header during SSR), hydrates the store, and redirects to `/login` on any failure. Add new authenticated screens as children of `_authed`, not with a per-route auth check.
-- `login.tsx` / `register.tsx` are **SSR-enabled** (not `ssr: false`) because the httpOnly cookie is available to the server on the initial request, and share one form component, `components/auth-form.tsx`. Login is **username-only** (no email fallback — the installed `better-auth` version's `username` plugin has no such option); registration calls `authClient.signUp.email(...)` with `username` passed as an extra field, since there is no `signUp.username`.
+- `src/routes/_authed.tsx` is a pathless layout route with a **browser-only mount effect** (not an SSR loader): it calls `getSessionUser()` to validate the session behind a loading state, hydrates the store, and redirects to `/login` on any failure. This is the _only_ place that invalidates a token. Add new authenticated screens as children of `_authed`, not with a per-route auth check. A separate `__root.tsx` display-only sync effect populates the store for the `Header` on public pages (never redirects).
+- `login.tsx` / `register.tsx` are **SSR-enabled** (not `ssr: false`) — routes stay SSR-enabled by default, though auth decisions happen client-side (no token in `localStorage` during SSR). They share one form component, `components/auth-form.tsx`. Login is **username-only** (no email fallback — the installed `better-auth` version's `username` plugin has no such option); registration calls `authClient.signUp.email(...)` with `username` passed as an extra field, since there is no `signUp.username`.
 
 ## Type safety (Eden Treaty)
 

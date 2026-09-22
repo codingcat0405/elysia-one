@@ -44,28 +44,67 @@ async function signUp(overrides: Record<string, unknown> = {}) {
   )
 }
 
-function sessionCookie(res: Response): string {
-  const raw = res.headers.get('set-cookie')
-  if (!raw) throw new Error('sign-up response had no Set-Cookie header')
-  return raw.split(';')[0] // strip attributes, keep `name=value`
+// Extract the bearer token from the response header. Throws clearly if missing
+// so test failures point to the real issue (missing header) not a confusing 401.
+function authToken(res: Response): string {
+  const token = res.headers.get('set-auth-token')
+  if (!token) throw new Error('response had no set-auth-token header')
+  return token
+}
+
+// Helper for bearer auth headers (replaces the cookie-based flow).
+function bearer(token: string) {
+  return { authorization: `Bearer ${token}` }
 }
 
 describe('profile routes (real Postgres + Redis)', () => {
   beforeEach(truncateAuthTables)
   afterAll(truncateAuthTables)
 
-  it('GET /api/profile/me without a cookie is 401', async () => {
+  it('GET /api/profile/me without auth header is 401', async () => {
     const res = await app.handle(new Request('http://localhost/api/profile/me'))
     expect(res.status).toBe(401)
   })
 
-  it('GET /api/profile/me with a valid session returns the user', async () => {
+  it('sign-up response carries the set-auth-token header', async () => {
+    const res = await signUp()
+    expect(res.status).toBe(200)
+    const token = authToken(res)
+    expect(token).toBeTruthy()
+    expect(token.length).toBeGreaterThan(0)
+  })
+
+  it('sign-up response exposes set-auth-token via CORS', async () => {
+    const res = await app.handle(
+      new Request('http://localhost/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost:5173', // Client origin
+        },
+        body: JSON.stringify({
+          email: 'alice@example.com',
+          password: 'password123',
+          username: 'alice',
+          name: 'alice',
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const exposeHeaders = res.headers.get('access-control-expose-headers')
+    expect(exposeHeaders).toBeTruthy()
+    expect(exposeHeaders).toContain('set-auth-token')
+  })
+
+  it('GET /api/profile/me with a valid bearer token returns the user', async () => {
     const signupRes = await signUp()
     expect(signupRes.status).toBe(200)
-    const cookie = sessionCookie(signupRes)
+    const token = authToken(signupRes)
 
     const res = await app.handle(
-      new Request('http://localhost/api/profile/me', { headers: { cookie } }),
+      new Request('http://localhost/api/profile/me', {
+        headers: bearer(token),
+      }),
     )
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -76,13 +115,22 @@ describe('profile routes (real Postgres + Redis)', () => {
     })
   })
 
-  it('GET /api/profile/admin is 403 for a plain user', async () => {
+  it('GET /api/profile/me with invalid bearer token is 401', async () => {
+    const res = await app.handle(
+      new Request('http://localhost/api/profile/me', {
+        headers: bearer('not-a-real-token'),
+      }),
+    )
+    expect(res.status).toBe(401)
+  })
+
+  it('GET /api/profile/admin is 403 for a plain user with bearer token', async () => {
     const signupRes = await signUp()
-    const cookie = sessionCookie(signupRes)
+    const token = authToken(signupRes)
 
     const res = await app.handle(
       new Request('http://localhost/api/profile/admin', {
-        headers: { cookie },
+        headers: bearer(token),
       }),
     )
     expect(res.status).toBe(403)
@@ -91,7 +139,8 @@ describe('profile routes (real Postgres + Redis)', () => {
   it('blocks privilege escalation: role in the sign-up body is ignored', async () => {
     // The single highest-severity invariant in this codebase (auth.ts's
     // `role: { input: false }`) — this test is the automated version of the
-    // manual curl+psql check run during the Better Auth migration.
+    // manual curl+psql check run during the Better Auth migration. Now verified
+    // over the bearer token path (the path the app actually uses).
     const signupRes = await signUp({
       email: 'eve@example.com',
       username: 'eve',
@@ -102,10 +151,10 @@ describe('profile routes (real Postgres + Redis)', () => {
     expect(body.user.role).toBe('user')
 
     // Also verify via the actual authorization path, not just the response body.
-    const cookie = sessionCookie(signupRes)
+    const token = authToken(signupRes)
     const res = await app.handle(
       new Request('http://localhost/api/profile/admin', {
-        headers: { cookie },
+        headers: bearer(token),
       }),
     )
     expect(res.status).toBe(403)
@@ -128,5 +177,32 @@ describe('profile routes (real Postgres + Redis)', () => {
     const res = await signUp({ username: 'someone-else' })
     expect(res.status).toBeGreaterThanOrEqual(400)
     expect(res.status).toBeLessThan(500)
+  })
+
+  it('sign-in response carries the set-auth-token header and token authenticates', async () => {
+    await signUp()
+    const signInRes = await app.handle(
+      new Request('http://localhost/api/auth/sign-in/username', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'alice', password: 'password123' }),
+      }),
+    )
+    expect(signInRes.status).toBe(200)
+    const token = authToken(signInRes)
+
+    // Verify the token from sign-in actually authenticates
+    const res = await app.handle(
+      new Request('http://localhost/api/profile/me', {
+        headers: bearer(token),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({
+      id: expect.any(String),
+      username: 'alice',
+      role: 'user',
+    })
   })
 })

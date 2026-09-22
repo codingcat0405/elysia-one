@@ -1,6 +1,6 @@
 # Elysia One — API
 
-Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), [Better Auth](https://better-auth.com) (username/password + Google OAuth, httpOnly session cookie) on a `better-auth-mikro-orm` adapter over the same MikroORM pool. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
+Bun backend: Elysia (HTTP), MikroORM/PostgreSQL (data), BullMQ/Redis (background jobs), Winston (logging), [Better Auth](https://better-auth.com) (username/password + optional Google OAuth, bearer token auth) on a `better-auth-mikro-orm` adapter over the same MikroORM pool. Exports an `App` type consumed by `apps/client` via Eden Treaty for end-to-end type safety — see "Eden Treaty type export" below.
 
 ## Quick start
 
@@ -147,7 +147,7 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 | `BETTER_AUTH_SECRET`                        | **yes**        | —                          | Signs/verifies session tokens and CSRF state; boot fails fast if missing. 32+ chars, `openssl rand -base64 48`                                                                                                                                                                                                               |
 | `BETTER_AUTH_URL`                           | no             | `http://localhost:${PORT}` | Public origin of this API; used to construct the OAuth callback URL. Must be the exact public URL in prod                                                                                                                                                                                                                    |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | no, but paired | —                          | Google sign-in is enabled only when **both** are set; boot fails fast if exactly one is set. See "Quick start" above for the Google Cloud Console step                                                                                                                                                                       |
-| `CLIENT_URL`                                | no             | `http://localhost:3001`    | Exact browser origin(s) for credentialed CORS, comma-separated for multiple. Also doubles as Better Auth's `trustedOrigins` (Origin/Referer check on state-changing requests). Not boot-required (defaults to the dev port), but a wrong value silently breaks cookie storage in the browser — no boot-time check catches it |
+| `CLIENT_URL`                                | no             | `http://localhost:3001`    | Exact browser origin(s) for CORS, comma-separated for multiple. Also doubles as Better Auth's `trustedOrigins` (Origin/Referer check on state-changing requests). Not boot-required (defaults to the dev port), but a wrong value silently rejects sign-up/sign-in requests from the real client origin — no boot-time check catches it |
 | `DB_POOL_MIN` / `DB_POOL_MAX`               | no             | `0` / `10`                 | Per-process pool; multiply by replica count when sizing Postgres `max_connections`                                                                                                                                                                                                                                           |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS`                | no             | `10000`                    | Fail fast instead of hanging                                                                                                                                                                                                                                                                                                 |
 | `DB_POOL_IDLE_TIMEOUT_MS`                   | no             | `30000`                    | Keep under infra idle timeouts                                                                                                                                                                                                                                                                                               |
@@ -159,19 +159,17 @@ Services/macros throw `HttpError` subclasses (`utils/http-errors.ts`): `BadReque
 | `NODE_ENV`                                  | no             | —                          | `production` switches log format + Docker default; also enables `Secure` flag on the session cookie                                                                                                                                                                                                                          |
 | `LOG_LEVEL`                                 | no             | `info`(prod)/`debug`(dev)  | winston level                                                                                                                                                                                                                                                                                                                |
 
-## Deploying with cookie auth
+## Deploying with bearer auth
 
-The httpOnly session cookie imposes a few deployment constraints:
+The client stores the session token in `localStorage` and sends it as `Authorization: Bearer <token>` on every request. This solves cross-site deployments (FE and API on different registrable domains) where cookies would be blocked. A few deployment constraints remain:
 
-1. **CLIENT_URL must be the exact browser origin.** It is both the CORS origin and Better Auth's `trustedOrigins` entry. Credentialed cookies silently fail to store if the browser origin doesn't match exactly, and `trustedOrigins` rejects state-changing requests from anything not on the list. `CLIENT_URL=https://app.example.com` works; a wildcard does not — and it is **not** boot-required, it silently defaults to `http://localhost:3001`, so double-check it explicitly in every environment.
+1. **CLIENT_URL must be the exact browser origin.** It feeds into `trustedOrigins`, Better Auth's allowlist for state-changing requests (sign-up, sign-in). Requests from an origin not on the list are rejected. `CLIENT_URL=https://app.example.com` works; a wildcard does not — and it is **not** boot-required, it silently defaults to `http://localhost:3001`, so double-check it explicitly in every environment.
 
 2. **BETTER_AUTH_URL must be the exact public URL of this API in production.** It's used to construct the Google OAuth callback URL (`${BETTER_AUTH_URL}/api/auth/callback/google`) — the production Google redirect URI must be registered separately from the dev one in the Google Cloud Console.
 
-3. **SameSite=Lax, not Strict.** The session cookie uses Better Auth's default `SameSite=Lax` — required so the Google OAuth redirect survives (Strict cookies don't survive a top-level cross-site navigation back from `accounts.google.com`). CSRF defence is Lax's own same-site-for-unsafe-methods behaviour plus the `trustedOrigins` check above, not `SameSite=Strict`.
+3. **Bearer tokens are not auto-sent by the browser.** CSRF risk is therefore lower than cookies — the browser won't automatically attach a token to a malicious cross-site request. `trustedOrigins` provides an additional origin allowlist to block unexpected state-changing requests.
 
-4. **NODE_ENV=production enables the Secure flag.** In production, the session cookie is marked `Secure`, so it's only sent over HTTPS. Locally, without `NODE_ENV=production`, it's sent over HTTP for easier testing. If your deployment doesn't set `NODE_ENV=production`, the cookie won't be sent to HTTPS clients (or vice versa).
-
-There is no `COOKIE_DOMAIN`-equivalent var wired up — this template assumes client and API share an exact origin/registrable domain per environment. A genuinely split-subdomain deployment (client on `app.example.com`, API on `api.example.com`) would need `advanced.crossSubDomainCookies` configured in `src/auth.ts`; not done here, deliberately (see "Known gaps").
+4. **The `better-auth.session_token` cookie is still issued but unused.** Better Auth's mounted handler still sets a cookie on sign-in and clears it on sign-out (there is no documented flag to suppress it). This app never reads, sends, or forwards the cookie — it relies entirely on the bearer token. The cookie remains inert to allow a rollback to cookie-based auth if needed.
 
 ## Testing
 
@@ -193,7 +191,10 @@ CI is not set up (see gaps below), so these currently only run when someone runs
 - No CI (`.github/workflows` doesn't exist) — tests exist (see "Testing" above) but nothing runs them automatically.
 - No rate limiting on `/api/auth/*` (sign-in/sign-up/etc. are unthrottled).
 - No email verification (`user.emailVerified` is always `false`) and no password reset flow — the `verification` table exists (Better Auth core schema) but nothing writes to it; wiring either up means adding a mailer.
-- No `advanced.crossSubDomainCookies` support — see "Deploying with cookie auth" above.
+- **Google OAuth + bearer tokens is unsolved.** The OAuth callback is a top-level browser redirect, which cannot hand a `set-auth-token` response header to JavaScript the way a `fetch` call can. Google sign-in is currently disabled in this environment (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` unset); re-enabling it requires a separate design (e.g., a server-side callback handler that redirects with the token in a fragment or query param).
+- **Session tokens live in `localStorage`, readable by injected JavaScript (XSS).** The cookie was `httpOnly` and therefore inaccessible to scripts. This is an accepted trade-off, chosen to solve the cross-site deployment problem; the mitigation is "don't ship XSS" — use Content Security Policy headers and input sanitization.
+- **No token refresh/rotation.** The token is valid until the session TTL expires or the user signs out. There is no auto-refresh mechanism, no sliding-window tokens, no device auth.
+- **Auth is no longer enforced during SSR.** An authed page costs one client-side session round-trip behind a loading state before it renders. The `/api/profile/*` routes (and all authenticated endpoints) still enforce auth via `checkAuth` at the API level — the guard moved from the server-side route loader to a client-side effect (see `apps/client/AGENTS.md` §4), so the first server render shows a loading state, not the full page. This is a deliberate trade-off to unblock the cross-site deployment story.
 
 ---
 
